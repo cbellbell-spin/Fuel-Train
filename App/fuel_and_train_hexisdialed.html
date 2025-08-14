@@ -4,12 +4,6 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Fuel & Train — Tracker (Sheets + AI)</title>
-
-  <link rel="icon" href="favicon.ico" sizes="any">
-  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png">
-
 <style>
   :root{--bg:#0f172a;--panel:#111827;--soft:#1f2937;--text:#e5e7eb;--muted:#9ca3af;--accent:#22c55e;--accent2:#60a5fa;--warn:#f59e0b;--danger:#ef4444}
   *{box-sizing:border-box}
@@ -95,7 +89,7 @@ const defaultState = {
     highDayCarb_g_per_kg: 6.0, modDayCarb_g_per_kg: 4.0, lowDayCarb_g_per_kg: 2.5, fat_g_per_kg: 0.8,
     goal: 'recomp', deficit: 400, glp1: false, dayType: 'moderate', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local',
     sheetsEndpoint: '', openaiKey: '', openaiModel: 'gpt-4o-mini'
-  }, dietaryStrategy: 'none',
+  },
   lastSync: null
 };
 function loadState(){ try{ const raw=localStorage.getItem('ft-app-state-v2'); if(!raw) return JSON.parse(JSON.stringify(defaultState)); const s=JSON.parse(raw); s.settings=Object.assign({},defaultState.settings,s.settings||{}); s.foods=s.foods||[]; s.exercises=s.exercises||[]; s.meals=s.meals||[]; return s; }catch{ return JSON.parse(JSON.stringify(defaultState)); } }
@@ -178,44 +172,6 @@ function macroPlan(){
   const s=state.settings; const bw=toNum(s.bodyWeightKg,80);
   const protein = Math.max(bw*toNum(s.proteinPerKg,2.0), bw*1.6);
   let ckg=s.modDayCarb_g_per_kg; if(s.dayType==='high') ckg=s.highDayCarb_g_per_kg; if(s.dayType==='low') ckg=s.lowDayCarb_g_per_kg; if(s.dayType==='rest') ckg=Math.min(2.0,s.lowDayCarb_g_per_kg);
-  // Strategy adjustments
-  const strat = s.dietaryStrategy || 'none';
-  
-  if (strat === 'hexis') {
-    const exToday = state.exercises.filter(e => e.date === todayStr());
-    const hoursByInt = exToday.reduce((acc,e) => {
-      const h = toNum(e.durationMin,0)/60;
-      const w = e.intensity==='high' ? 2.0 : e.intensity==='moderate' ? 1.5 : e.intensity==='low' ? 1.0 : 0.0;
-      acc.load += h * w;
-      acc.h += h;
-      return acc;
-    }, {load:0, h:0});
-    // Translate training load to carbs per kg
-    // Rough guide: 0h -> 2 g/kg, 1h@mod (~1.5 load) -> ~4 g/kg, 2h@mod (~3 load) -> ~6 g/kg, 3h+ hard -> 7–8 g/kg
-    const load = hoursByInt.load;
-    const mapped = 2.0 + Math.min(6.0, load * 2.0); // slope ~2 g/kg per "load" unit, cap +6
-    const fallback = ({high:7.0, moderate:4.5, low:2.5, rest:2.0})[s.dayType] ?? 4.0;
-    ckg = Math.max(2.0, Math.min(8.0, (exToday.length ? mapped : fallback)));
-  }
-;
-    const key = s.dayType in hexisMap ? s.dayType : 'moderate';
-    ckg = hexisMap[key];
-  } else if (strat === 'paleo') {
-    ckg = Math.min(ckg, 3.0);
-    s.fat_g_per_kg = Math.max(toNum(s.fat_g_per_kg,0.8), 1.0);
-  } else if (strat === 'keto') {
-    const carbsFixed = 30;
-    const kcP = protein*4;
-    const actToday = state.exercises.filter(e=> e.date===todayStr()).reduce((a,b)=> a+correctedActiveCalories(b),0);
-    const tdee = toNum(s.ree,1950)+actToday;
-    let target=tdee; if(s.goal==='loss') target-=toNum(s.deficit,400); if(s.goal==='recomp') target-=Math.min(toNum(s.deficit,400),300); if(s.goal==='gain') target+=200;
-    const fats = Math.max(bw*toNum(s.fat_g_per_kg,0.8), (target - kcP - carbsFixed*4)/9);
-    return { protein, carbs: carbsFixed, fats, kcalsTarget: target, tdee, actToday };
-  } else if (strat === 'mediterranean') {
-    ckg = Math.max(3.0, Math.min(ckg, 5.0));
-    s.fat_g_per_kg = Math.max(toNum(s.fat_g_per_kg,0.8), 1.0);
-  }
-
   const carbs = bw*ckg; const fatsMin=bw*toNum(s.fat_g_per_kg,0.8);
   const kcP=protein*4, kcC=carbs*4;
   const actToday = state.exercises.filter(e=> e.date===todayStr()).reduce((a,b)=> a+correctedActiveCalories(b),0);
@@ -618,25 +574,6 @@ function renderSettings(){
           <select id="s-glp1"><option value="false" ${!s.glp1?'selected':''}>No</option><option value="true" ${s.glp1?'selected':''}>Yes</option></select>
         </div>
       </div>
-    <div class="panel">
-      <h3 class="small">Diet Strategy</h3>
-      <div class="grid g4">
-        <div>
-          <label>Strategy</label>
-          <select id="s-strategy">
-            <option value="none">None</option>
-            <option value="hexis">Hexis (carb periodization)</option>
-            <option value="paleo">Paleo</option>
-            <option value="keto">Keto</option>
-            <option value="mediterranean">Mediterranean</option>
-          </select>
-        </div>
-        <div style="grid-column: span 3">
-          <div class="small muted">Strategy adjusts macro targets. Hexis ties carbs to your day type. You can still edit numbers.</div>
-        </div>
-      </div>
-    </div>
-
     </div>
     <div class="panel">
       <h3 class="small">Macros by Day Type</h3>
@@ -663,29 +600,14 @@ function renderSettings(){
     s.actCalFactor=toNum($('#s-fact').value,s.actCalFactor); s.dayType=$('#s-day').value; s.goal=$('#s-goal').value; s.deficit=toNum($('#s-def').value,s.deficit);
     s.glp1=$('#s-glp1').value==='true'; s.highDayCarb_g_per_kg=toNum($('#s-ch-high').value,s.highDayCarb_g_per_kg); s.modDayCarb_g_per_kg=toNum($('#s-ch-mod').value,s.modDayCarb_g_per_kg);
     s.lowDayCarb_g_per_kg=toNum($('#s-ch-low').value,s.lowDayCarb_g_per_kg); s.fat_g_per_kg=toNum($('#s-fatkg').value,s.fat_g_per_kg);
-    s.sheetsEndpoint=$('#s-sheet').value.trim(); s.openaiKey=$('#s-openai').value.trim(); s.openaiModel=$('#s-model').value.trim()||'gpt-4o-mini'; s.dietaryStrategy=$('#s-strategy')? $('#s-strategy').value : (s.dietaryStrategy||'none');
+    s.sheetsEndpoint=$('#s-sheet').value.trim(); s.openaiKey=$('#s-openai').value.trim(); s.openaiModel=$('#s-model').value.trim()||'gpt-4o-mini';
     SHEETS_ENDPOINT=s.sheetsEndpoint; OPENAI_KEY=s.openaiKey; OPENAI_MODEL=s.openaiModel; saveState(); toast('Saved');
   };
   $('#s-sync').onclick = trySync;
-
-  const sel = $('#s-strategy'); if (sel) { sel.value = s.dietaryStrategy || 'none'; }
-
 }
 
 function renderSuggest(){
   const el=$('#view-suggest'); const mp=macroPlan();
-  const strat = (state.settings && state.settings.dietaryStrategy) || 'none';
-  const hexSplit = strat==='hexis' ? (function(){
-    // simple timing model: 25% pre, 50% during+immediate, 25% remainder
-    const targetC = Math.max(0, mp.carbs || 0);
-    const pre = Math.round(targetC * 0.25);
-    const during = Math.round(targetC * 0.35); // carbs during training windows
-    const post = Math.round(targetC * 0.15);
-    const rest = Math.max(0, targetC - pre - during - post);
-    return {pre, during, post, rest};
-  })() : null;
-
-  const stratNote = strat==='hexis' ? 'Hexis preset active: carbs scale with day type.' : strat==='paleo' ? 'Paleo preset active: carbs moderated, fats slightly higher.' : strat==='keto' ? 'Keto preset active: ~30 g carbs/day; fats fill remaining calories.' : strat==='mediterranean' ? 'Mediterranean preset active: balanced carbs and fats.' : '';
   const eaten=state.foods.filter(f=> f.date===todayStr()).reduce((a,f)=>{a.kcal+=toNum(f.calories,0);a.p+=toNum(f.protein,0);a.c+=toNum(f.carbs,0);a.f+=toNum(f.fat,0);return a;},{kcal:0,p:0,c:0,f:0});
   const left = {kcal: mp.kcalsTarget - eaten.kcal, p: mp.protein - eaten.p, c: mp.carbs - eaten.c, f: mp.fats - eaten.f};
   const dt=state.settings.dayType;
@@ -705,7 +627,7 @@ function renderSuggest(){
     </div>
     <div class="panel">
       <h3 class="small">Actionable suggestions</h3>
-      <ul class="small"><li><b>Strategy:</b> ${stratNote}</li>${strat==='hexis' && hexSplit ? `<li><b>Hexis split:</b> Pre ~${hexSplit.pre} g • During ~${hexSplit.during} g • Post ~${hexSplit.post} g • Rest of day ~${hexSplit.rest} g</li>` : ''}
+      <ul class="small">
         <li><b>Fueling timing:</b> ${timing.join(' • ')}</li>
         <li><b>Protein floor:</b> close ${fmt1(mp.protein)} g by dinner. Add a 30–40 g protein snack if behind.</li>
         ${state.settings.glp1 ? `<li><b>GLP-1 adjustments:</b> ${glp1Tips.join(' • ')}</li>` : ''}
