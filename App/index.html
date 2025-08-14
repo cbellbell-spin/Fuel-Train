@@ -139,16 +139,8 @@ async function deleteRow(sheet, id){ if(!SHEETS_ENDPOINT) return; try{ await api
 
 async function lookupMacrosWithAI(description){
   if (!SHEETS_ENDPOINT) throw new Error('No backend set. Add your Apps Script Web App URL in Settings.');
-
-  const body = new URLSearchParams();
-  body.set('action', 'ai.nutrition');
-  body.set('description', description);
-
-  const res = await fetch(SHEETS_ENDPOINT, {
-    method: 'POST',
-    body // browser sets Content-Type to application/x-www-form-urlencoded automatically
-  });
-
+  const url = SHEETS_ENDPOINT + '?action=ai.nutrition&description=' + encodeURIComponent(description || '');
+  const res = await fetch(url, { method: 'GET' }); // no headers, no body
   if (!res.ok) throw new Error(`Backend error ${res.status}`);
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'AI lookup failed');
