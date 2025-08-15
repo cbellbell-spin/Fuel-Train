@@ -73,9 +73,29 @@ let OPENAI_MODEL = 'gpt-4o-mini';
 
 const $ = (s, r=document)=> r.querySelector(s);
 const $$ = (s, r=document)=> Array.from(r.querySelectorAll(s));
-const todayStr = ()=> new Date().toISOString().slice(0,10);
+const todayStr = ()=>{
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); // local YYYY-MM-DD
+  return d.toISOString().slice(0,10);
+};
+
 const toNum = (v,d=0)=> isNaN(parseFloat(v))? d : parseFloat(v);
 const fmt1 = n=> (isFinite(n)? Math.round(n): 0);
+function dateKey(v){
+  if (v instanceof Date) {
+    const d = new Date(v.getTime() - v.getTimezoneOffset()*60000);
+    return d.toISOString().slice(0,10);
+  }
+  const s = String(v || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d2 = new Date(s);
+  if (!isNaN(d2)) {
+    d2.setMinutes(d2.getMinutes() - d2.getTimezoneOffset());
+    return d2.toISOString().slice(0,10);
+  }
+  return todayStr(); // fallback so rows aren’t “lost”
+}
+
 const uid = ()=> Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
 function toast(m){ try{ alert(m); }catch{} }
 
@@ -237,9 +257,21 @@ async function trySync(opts={ refresh:true }) {
     const res = await api('bootstrap', { version: APP_VERSION });
     const payload = (res && res.result) ? res.result : res;
 
-    if (Array.isArray(payload.foods))     state.foods = payload.foods;
-    if (Array.isArray(payload.exercises)) state.exercises = payload.exercises;
-    if (Array.isArray(payload.meals))     state.meals = payload.meals;
+    if (Array.isArray(payload.foods)) {
+  state.foods = payload.foods.map(r => ({
+    ...r,
+    date: dateKey(r.date)
+  }));
+}
+if (Array.isArray(payload.exercises)) {
+  state.exercises = payload.exercises.map(r => ({
+    ...r,
+    date: dateKey(r.date)
+  }));
+}
+if (Array.isArray(payload.meals)) {
+  state.meals = payload.meals.slice(); // no date column here
+}
 
     state.lastSync = new Date().toISOString();
     saveState();
@@ -284,8 +316,8 @@ function correctedActiveCalories(e){
   return met * toNum(state.settings.bodyWeightKg,80) * durH;
 }
 function calcTotals(dateStr){
-  const foods = state.foods.filter(f=> f.date===dateStr);
-  const exs = state.exercises.filter(e=> e.date===dateStr);
+  const foods = state.foods.filter(f=> dateKey(f.date) === dateStr);
+  const exs   = state.exercises.filter(e=> dateKey(e.date) === dateStr);
   const calFood = foods.reduce((a,b)=> a+toNum(b.calories),0);
   const p = foods.reduce((a,b)=> a+toNum(b.protein),0);
   const c = foods.reduce((a,b)=> a+toNum(b.carbs),0);
@@ -576,7 +608,7 @@ function renderFood(){
 
 function renderFoodTable(){
   const container=$('#f-table'); const filter=$('#f-filter').value;
-  const rows=state.foods.filter(r=> !filter || r.date===filter);
+  const rows = state.foods.filter(r=> !filter || dateKey(r.date) === filter);
   const total=rows.reduce((a,b)=>{a.cal+=toNum(b.calories);a.p+=toNum(b.protein);a.c+=toNum(b.carbs);a.f+=toNum(b.fat);return a;},{cal:0,p:0,c:0,f:0});
   container.innerHTML = `
     <div class="row">
@@ -664,7 +696,7 @@ function renderExercise(){
 }
 function renderExerciseTable(){
   const container=$('#e-table'); const filter=$('#e-filter').value;
-  const rows=state.exercises.filter(r=> !filter || r.date===filter);
+  const rows = state.exercises.filter(r=> !filter || dateKey(r.date) === filter);
   const totalActive = rows.reduce((a,b)=> a+correctedActiveCalories(b),0);
   container.innerHTML = `
     <div class="row"><div class="pill">Entries: ${rows.length}</div><div class="pill">Corrected active kcals: ${fmt1(totalActive)}</div></div>
