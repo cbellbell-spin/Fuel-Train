@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Fuel & Train — Tracker (Sheets + AI)</title>
+<title>Fuel & Train - Tracker (Sheets + AI)</title>
 <link rel="icon" href="assets/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
@@ -66,7 +66,7 @@
 </main>
 
 <script>
-const APP_VERSION = '1.3.0';
+const APP_VERSION = '1.3.1';
 let SHEETS_ENDPOINT = '';
 let OPENAI_KEY = '';
 let OPENAI_MODEL = 'gpt-4o-mini';
@@ -79,44 +79,71 @@ const fmt1 = n=> (isFinite(n)? Math.round(n): 0);
 const uid = ()=> Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
 function toast(m){ alert(m); }
 
+// suggestion keyboard-nav state
+let _suggestList = [];
+let _suggestIndex = -1;
+function clearSuggestions(){
+  _suggestList = [];
+  _suggestIndex = -1;
+  renderFoodSuggestions([]);
+}
+function pickSuggestionByIndex(i){
+  if (!_suggestList || _suggestList.length === 0) return;
+  if (i < 0) i = 0;
+  if (i >= _suggestList.length) i = _suggestList.length - 1;
+  _suggestIndex = i;
+  renderFoodSuggestions(_suggestList); // highlight
+  const r = _suggestList[_suggestIndex];
+  $('#f-item').value = r.name || '';
+  $('#f-cal').value  = r.calories || 0;
+  $('#f-prot').value = r.protein  || 0;
+  $('#f-carb').value = r.carbs    || 0;
+  $('#f-fat').value  = r.fat      || 0;
+  const notesEl = $('#f-notes');
+  if (notesEl && r.serving_desc && !notesEl.value) notesEl.value = r.serving_desc;
+}
+function pickActiveSuggestion(){
+  if (_suggestIndex < 0 || !_suggestList.length) return false;
+  const r = _suggestList[_suggestIndex];
+  $('#f-item').value = r.name || '';
+  clearSuggestions();
+  return true;
+}
+
 async function api(action, payload={}){
   if(!SHEETS_ENDPOINT) throw new Error('No Sheets endpoint configured');
-  const res = await fetch(SHEETS_ENDPOINT, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action, payload}) });
+  const res = await fetch(SHEETS_ENDPOINT, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({action, payload})
+  });
   if(!res.ok) throw new Error('Sheets API error '+res.status);
   return res.json();
 }
-// ==== Food Library client helpers ====
 
-// simple normalizer for matching
+// Food Library client helpers
 function norm(s){
-  return String(s||'')
-    .toLowerCase()
-    .replace(/[^a-z0-9\s]/g,' ')
-    .replace(/\s+/g,' ')
-    .trim();
+  return String(s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
 }
-
-// call backend to find items in Food Library
 async function findFoodLibrary(q, limit=8){
   const res = await api('foodlib.find', { q, limit });
-  // backend returns { ok:true, results:[...] }
   if (!res || res.ok === false) return [];
   return res.results || res.rows || [];
 }
-
-// render suggestions list under the Item field
 function renderFoodSuggestions(list){
+  _suggestList = Array.isArray(list) ? list : [];
   const box = document.getElementById('f-suggest');
   if (!box) return;
-  if (!list || !list.length){
+  if (!_suggestList.length){
     box.innerHTML = '';
     return;
   }
+  const activeIdx = _suggestIndex;
   box.innerHTML = `
     <div class="panel" style="padding:8px">
       <div class="small muted">Matches in your Food Library</div>
-      ${list.map(r=>`
-        <div class="row" style="justify-content:space-between;border-top:1px solid #1f2a40;padding:6px 0">
+      ${_suggestList.map((r,idx)=>`
+        <div class="row" data-idx="${idx}" style="justify-content:space-between;border-top:1px solid #1f2a40;padding:6px 0;${idx===activeIdx?'outline:2px solid rgba(96,165,250,0.35);border-radius:8px':''}">
           <div>
             <div><b>${r.name || ''}</b> ${r.brand ? '· '+r.brand : ''}</div>
             <div class="muted small">${r.serving_desc || ''}</div>
@@ -128,22 +155,25 @@ function renderFoodSuggestions(list){
       `).join('')}
     </div>
   `;
-  // click to fill the form
+  // click select
   box.querySelectorAll('[data-pick]').forEach(btn=>{
     btn.onclick = ()=>{
       const id = btn.getAttribute('data-pick');
-      const r = list.find(x => String(x.id) === String(id));
+      const r = _suggestList.find(x => String(x.id) === String(id));
       if (!r) return;
-      // write values into the form
-      document.getElementById('f-item').value  = r.name || '';
-      document.getElementById('f-cal').value   = r.calories || 0;
-      document.getElementById('f-prot').value  = r.protein  || 0;
-      document.getElementById('f-carb').value  = r.carbs    || 0;
-      document.getElementById('f-fat').value   = r.fat      || 0;
-      const notesEl = document.getElementById('f-notes');
+      $('#f-item').value = r.name || '';
+      $('#f-cal').value  = r.calories || 0;
+      $('#f-prot').value = r.protein  || 0;
+      $('#f-carb').value  = r.carbs    || 0;
+      $('#f-fat').value   = r.fat      || 0;
+      const notesEl = $('#f-notes');
       if (notesEl && r.serving_desc && !notesEl.value) notesEl.value = r.serving_desc;
-      renderFoodSuggestions([]); // clear after select
+      clearSuggestions();
     };
+  });
+  // hover highlight
+  box.querySelectorAll('[data-idx]').forEach(row=>{
+    row.onmouseenter = ()=>{ _suggestIndex = Number(row.getAttribute('data-idx')); renderFoodSuggestions(_suggestList); };
   });
 }
 
@@ -201,11 +231,11 @@ async function deleteRow(sheet, id){ if(!SHEETS_ENDPOINT) return; try{ await api
 async function lookupMacrosWithAI(description){
   if (!SHEETS_ENDPOINT) throw new Error('No backend set. Add your Apps Script Web App URL in Settings.');
   const url = SHEETS_ENDPOINT + '?action=ai.nutrition&description=' + encodeURIComponent(description || '');
-  const res = await fetch(url, { method: 'GET' }); // no headers, no body
+  const res = await fetch(url, { method: 'GET' });
   if (!res.ok) throw new Error(`Backend error ${res.status}`);
   const data = await res.json();
   if (!data.ok) throw new Error(data.error || 'AI lookup failed');
-  return data.result; // { calories, protein, carbs, fat }
+  return data.result;
 }
 
 function correctedActiveCalories(e){
@@ -229,13 +259,11 @@ function calcTotals(dateStr){
 function macroPlan(){
   const s=state.settings; const bw=toNum(s.bodyWeightKg,80);
   const protein = Math.max(bw*toNum(s.proteinPerKg,2.0), bw*1.6);
-  // carbs per kg before strategy
   let ckg=s.modDayCarb_g_per_kg;
   if(s.dayType==='high'){ ckg=s.highDayCarb_g_per_kg; }
   else if(s.dayType==='low'){ ckg=s.lowDayCarb_g_per_kg; }
   else if(s.dayType==='rest'){ ckg=Math.min(2.0,s.lowDayCarb_g_per_kg); }
 
-  // Strategy adjustments (Hexis default)
   const strat = s.dietaryStrategy || 'none';
   if (strat === 'hexis') {
     const exToday = state.exercises.filter(e => e.date === todayStr());
@@ -351,13 +379,28 @@ function renderFood(){
         <div><label>Time</label><input id="f-time" type="time" value="${new Date().toTimeString().slice(0,5)}"></div>
         <div class="g3" style="grid-column: span 2">
           <div><label>Item</label><input id="f-item"></div>
-          <div id="f-suggest" class="small"></div>
+          <div id="f-suggest" class="small" style="grid-column: 1 / -1; margin-top: 6px; border:1px dashed #334155; border-radius:8px;"></div>
           <div><label>Calories</label><input id="f-cal" type="number"></div>
           <div><label>Protein (g)</label><input id="f-prot" type="number" step="0.1"></div>
           <div><label>Carbs (g)</label><input id="f-carb" type="number" step="0.1"></div>
           <div><label>Fat (g)</label><input id="f-fat" type="number" step="0.1"></div>
         </div>
         <div style="grid-column: span 4"><label>Notes</label><textarea id="f-notes"></textarea></div>
+
+        <div class="panel" style="grid-column: span 4; margin-top:12px">
+          <div class="row">
+            <div style="flex:1">
+              <label>From Meal Plan</label>
+              <select id="f-mealpick">
+                <option value="">Pick a saved meal…</option>
+              </select>
+            </div>
+            <button class="btn secondary" id="f-meal-apply">Apply to form</button>
+            <button class="btn secondary" id="f-meal-add">Add as entry</button>
+          </div>
+          <div class="small muted">Apply fills the fields. Add inserts a Food Log row for this meal.</div>
+        </div>
+
       </div>
       <div class="row">
         <button class="btn secondary" id="f-ai">Lookup macros with AI</button>
@@ -376,6 +419,8 @@ function renderFood(){
       <div id="f-table"></div>
     </div>
   `;
+
+  // AI lookup
   $('#f-ai').onclick = async ()=>{
     try{
       const desc=$('#f-item').value.trim(); if(!desc){ toast('Enter a food description'); return; }
@@ -383,62 +428,117 @@ function renderFood(){
       $('#f-cal').value=r.calories||''; $('#f-prot').value=r.protein||''; $('#f-carb').value=r.carbs||''; $('#f-fat').value=r.fat||'';
     }catch(e){ toast(e.message); }
   };
-$('#f-add').onclick = async ()=>{
-  const row = {
-    id: uid(),
-    date: $('#f-date').value || todayStr(),
-    time: $('#f-time').value || '00:00',
-    item: $('#f-item').value.trim() || 'Food',
-    calories: toNum($('#f-cal').value,0),
-    protein: toNum($('#f-prot').value,0),
-    carbs: toNum($('#f-carb').value,0),
-    fat: toNum($('#f-fat').value,0),
-    notes: $('#f-notes').value.trim()
-  };
 
-  state.foods.push(row); 
-  saveState();
-  if (SHEETS_ENDPOINT) {
-    // save to Food Log as before
-    pushRow('Food Log', row);
-    // new: grow your Food Library
-    api('foodlib.upsert', {
-      row: {
+  // Add food and upsert to Food Library
+  $('#f-add').onclick = async ()=>{
+    const row = {
+      id: uid(),
+      date: $('#f-date').value || todayStr(),
+      time: $('#f-time').value || '00:00',
+      item: $('#f-item').value.trim() || 'Food',
+      calories: toNum($('#f-cal').value,0),
+      protein: toNum($('#f-prot').value,0),
+      carbs: toNum($('#f-carb').value,0),
+      fat: toNum($('#f-fat').value,0),
+      notes: $('#f-notes').value.trim()
+    };
+    state.foods.push(row); 
+    saveState();
+    if (SHEETS_ENDPOINT) {
+      pushRow('Food Log', row);
+      api('foodlib.upsert', { row:{
         name: row.item,
         serving_desc: row.notes || '',
-        calories: row.calories,
-        protein: row.protein,
-        carbs: row.carbs,
-        fat: row.fat,
+        calories: row.calories, protein: row.protein, carbs: row.carbs, fat: row.fat,
         source: 'food_log'
-      }
-    }).catch(()=>{ /* ignore errors here */ });
-  }
-  renderFood();
-};
+      }}).catch(()=>{});
+    }
+    renderFood();
+  };
 
+  // Meal picker populate and actions
+  const mealSel = $('#f-mealpick');
+  if (mealSel) {
+    const meals = (state.meals || []).slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+    meals.forEach(m=>{
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = `${m.name || 'Meal'} • ${fmt1(m.calories||0)} kcal · ${fmt1(m.protein||0)}P ${fmt1(m.carbs||0)}C ${fmt1(m.fat||0)}F`;
+      mealSel.appendChild(opt);
+    });
+  }
+  function getMealById(id){ return (state.meals || []).find(m=> String(m.id) === String(id)); }
+  $('#f-meal-apply').onclick = ()=>{
+    const chosen = getMealById($('#f-mealpick').value);
+    if (!chosen) { toast('Pick a meal'); return; }
+    $('#f-item').value = chosen.name || 'Meal';
+    $('#f-cal').value  = toNum(chosen.calories,0);
+    $('#f-prot').value = toNum(chosen.protein,0);
+    $('#f-carb').value = toNum(chosen.carbs,0);
+    $('#f-fat').value  = toNum(chosen.fat,0);
+    const notesEl = $('#f-notes');
+    if (notesEl && chosen.items && !notesEl.value) notesEl.value = chosen.items;
+  };
+  $('#f-meal-add').onclick = async ()=>{
+    const chosen = getMealById($('#f-mealpick').value);
+    if (!chosen) { toast('Pick a meal'); return; }
+    const row = {
+      id: uid(),
+      date: $('#f-date').value || todayStr(),
+      time: $('#f-time').value || '00:00',
+      item: chosen.name || 'Meal',
+      calories: toNum(chosen.calories,0),
+      protein: toNum(chosen.protein,0),
+      carbs: toNum(chosen.carbs,0),
+      fat: toNum(chosen.fat,0),
+      notes: chosen.items || ''
+    };
+    state.foods.push(row); saveState();
+    if (SHEETS_ENDPOINT) {
+      pushRow('Food Log', row);
+      api('foodlib.upsert', { row:{
+        name: row.item,
+        serving_desc: row.notes || '',
+        calories: row.calories, protein: row.protein, carbs: row.carbs, fat: row.fat,
+        source: 'meal_plan'
+      }}).catch(()=>{});
+    }
+    renderFood();
+  };
+
+  // Table controls
   $('#f-clear').onclick = ()=>{ $('#f-filter').value=''; renderFoodTable(); };
   $('#f-sync').onclick = trySync;
   $('#f-filter').onchange = renderFoodTable;
   renderFoodTable();
-  // === typeahead on Item field to query Food Library ===
-const fItem = document.getElementById('f-item');
-let suggestTimer = 0;
-fItem.addEventListener('input', ()=>{
-  clearTimeout(suggestTimer);
-  const q = fItem.value.trim();
-  if (q.length < 2) { renderFoodSuggestions([]); return; }
-  suggestTimer = setTimeout(async ()=>{
-    try {
-      const hits = await findFoodLibrary(q, 8);
-      renderFoodSuggestions(hits);
-    } catch {
-      renderFoodSuggestions([]);
-    }
-  }, 180);
-});
 
+  // Typeahead on Item
+  const fItem = document.getElementById('f-item');
+  let suggestTimer = 0;
+  fItem.addEventListener('input', ()=>{
+    clearTimeout(suggestTimer);
+    _suggestIndex = -1; // reset highlight
+    const q = fItem.value.trim();
+    if (q.length < 2) { clearSuggestions(); return; }
+    suggestTimer = setTimeout(async ()=>{
+      try {
+        const hits = await findFoodLibrary(q, 8);
+        console.debug('foodlib.find hits for', q, hits);
+        renderFoodSuggestions(hits);
+      } catch {
+        clearSuggestions();
+      }
+    }, 180);
+  });
+  fItem.addEventListener('keydown', (ev)=>{
+    if (!_suggestList || _suggestList.length === 0) return;
+    if (ev.key === 'ArrowDown') { ev.preventDefault(); pickSuggestionByIndex((_suggestIndex < 0 ? 0 : _suggestIndex + 1)); }
+    else if (ev.key === 'ArrowUp') { ev.preventDefault(); pickSuggestionByIndex((_suggestIndex <= 0 ? 0 : _suggestIndex - 1)); }
+    else if (ev.key === 'Enter') { if (pickActiveSuggestion()) ev.preventDefault(); }
+    else if (ev.key === 'Escape') { clearSuggestions(); }
+  });
 }
+
 function renderFoodTable(){
   const container=$('#f-table'); const filter=$('#f-filter').value;
   const rows=state.foods.filter(r=> !filter || r.date===filter);
@@ -633,7 +733,7 @@ function renderMealList(){
 function toCSV(rows, headers){
   const h=headers||Object.keys(rows[0]||{});
   const esc=v=>{ if(v==null) return ''; const s=String(v); return /[",\n]/.test(s)? '"'+s.replace(/"/g,'""')+'"' : s; };
-  const lines=[h.join(',')]; rows.forEach(r=> lines.push(h.map(k=> esc(r[k])).join(','))); return lines.join('\\n');
+  const lines=[h.join(',')]; rows.forEach(r=> lines.push(h.map(k=> esc(r[k])).join(','))); return lines.join('\n');
 }
 function renderData(){
   const el=$('#view-data');
@@ -678,7 +778,7 @@ function renderData(){
       const text=reader.result; const target=$('#imp-target').value;
       try{
         if(file.name.endsWith('.json') || target==='state'){ const obj=JSON.parse(text); state=Object.assign({},state,obj); saveState(); toast('Imported JSON'); location.reload(); return; }
-        const lines=text.split(/\\r?\\n/).filter(Boolean); const headers=lines.shift().split(',');
+        const lines=text.split(/\r?\n/).filter(Boolean); const headers=lines.shift().split(',');
         const parseRow=line=>{ const cells=[]; let cur='',q=false; for(let i=0;i<line.length;i++){ const ch=line[i]; if(q){ if(ch==='\"' && line[i+1]==='\"'){cur+='\"';i++;} else if(ch==='\"'){q=false;} else {cur+=ch;} } else { if(ch===','){cells.push(cur);cur='';} else if(ch==='\"'){q=true;} else {cur+=ch;} } } cells.push(cur); const obj={}; headers.forEach((h,idx)=> obj[h]=cells[idx]??''); return obj; };
         const rows = lines.map(parseRow);
         if(target==='foods' || (target==='auto' && headers.includes('item') && headers.includes('calories'))){
@@ -772,10 +872,9 @@ function renderSuggest(){
   let stratNote = '';
   if(strat==='hexis'){ stratNote='Hexis preset active: carbs scale with today’s training load.'; }
   else if(strat==='paleo'){ stratNote='Paleo preset active: carbs moderated, fats slightly higher.'; }
-  else if(strat==='keto'){ stratNote='Keto preset active: ~30 g carbs/day; fats fill remaining calories.'; }
+  else if(strat==='keto'){ stratNote='Keto preset active: about 30 g carbs per day; fats fill remaining calories.'; }
   else if(strat==='mediterranean'){ stratNote='Mediterranean preset active: balanced carbs and fats.'; }
 
-  // Hexis timing split (built safely without nested template literals)
   let hexLine = '';
   if(strat==='hexis'){
     const targetC = Math.max(0, mp.carbs || 0);
@@ -789,8 +888,8 @@ function renderSuggest(){
   const eaten=state.foods.filter(f=> f.date===todayStr()).reduce((a,f)=>{a.kcal+=toNum(f.calories,0);a.p+=toNum(f.protein,0);a.c+=toNum(f.carbs,0);a.f+=toNum(f.fat,0);return a;},{kcal:0,p:0,c:0,f:0});
   const left = {kcal: mp.kcalsTarget - eaten.kcal, p: mp.protein - eaten.p, c: mp.carbs - eaten.c, f: mp.fats - eaten.f};
   const dt=state.settings.dayType;
-  let timing=[]; if(dt==='high'){ timing=["Pre 2–3h: 1–1.5 g/kg carbs + lean protein, low fat","During: 60–90 g carbs/h if >90 min, sodium 500–800 mg/h","Post 0–2h: 0.6–1.0 g/kg carbs + 30–50 g protein"]; }
-  else if(dt==='moderate'){ timing=["Pre 1–2h: ~0.8 g/kg carbs + 25–35 g protein","During: 30–60 g carbs/h if >60 min","Post: 0.4–0.8 g/kg carbs + 30–40 g protein"]; }
+  let timing=[]; if(dt==='high'){ timing=["Pre 2-3h: 1-1.5 g/kg carbs + lean protein, low fat","During: 60-90 g carbs/h if over 90 min, sodium 500-800 mg/h","Post 0-2h: 0.6-1.0 g/kg carbs + 30-50 g protein"]; }
+  else if(dt==='moderate'){ timing=["Pre 1-2h: about 0.8 g/kg carbs + 25-35 g protein","During: 30-60 g carbs/h if over 60 min","Post: 0.4-0.8 g/kg carbs + 30-40 g protein"]; }
   else { timing=["Protein-forward meals","Place most carbs around training","Hydrate and salt as needed"]; }
 
   const glp1Tips = state.settings.glp1? ["Smaller, more frequent meals","Front-load protein earlier in day","Hydrate on waking before first food","Keep ultra-fatty foods moderate if nausea-prone"] : [];
@@ -811,9 +910,9 @@ function renderSuggest(){
         <li><b>Strategy:</b> ${stratNote}</li>
         ${hexLine}
         <li><b>Fueling timing:</b> ${timing.join(' • ')}</li>
-        <li><b>Protein floor:</b> close ${fmt1(mp.protein)} g by dinner. Add a 30–40 g protein snack if behind.</li>
+        <li><b>Protein floor:</b> close ${fmt1(mp.protein)} g by dinner. Add a 30-40 g protein snack if behind.</li>
         ${state.settings.glp1 ? `<li><b>GLP-1 adjustments:</b> ${glp1Tips.join(' • ')}</li>` : ''}
-        <li><b>Electrolytes:</b> 500–800 mg sodium per hour in heat or heavy sweat.</li>
+        <li><b>Electrolytes:</b> 500-800 mg sodium per hour in heat or heavy sweat.</li>
       </ul>
     </div>
   `;
