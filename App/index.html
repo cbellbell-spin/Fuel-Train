@@ -1,924 +1,259 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Fuel & Train - Tracker (Sheets + AI)</title>
-<link rel="icon" href="assets/favicon.ico" sizes="any">
-<link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
-<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-<style>
-  :root{--bg:#0f172a;--panel:#111827;--soft:#1f2937;--text:#e5e7eb;--muted:#9ca3af;--accent:#22c55e;--accent2:#60a5fa;--warn:#f59e0b;--danger:#ef4444}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,Helvetica,Arial,sans-serif}
-  header{position:sticky;top:0;z-index:5;background:linear-gradient(to bottom, rgba(15,23,42,0.95), rgba(15,23,42,0.75));backdrop-filter: blur(6px)}
-  .wrap{max-width:1200px;margin:0 auto;padding:16px}
-  h1{font-size:22px;margin:0 0 6px 0}
-  .sub{color:var(--muted);font-size:13px}
-  nav{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
-  nav button{background:var(--soft);border:1px solid #1f2937;color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer;font-size:14px}
-  nav button.active{border-color:var(--accent);outline:2px solid rgba(34,197,94,0.35)}
-  main{padding:16px}
-  .panel{background:var(--panel);border:1px solid #1f2937;border-radius:14px;padding:16px;margin-bottom:16px}
-  .grid{display:grid;gap:12px}
-  .g2{grid-template-columns:repeat(2,1fr)}
-  .g3{grid-template-columns:repeat(3,1fr)}
-  .g4{grid-template-columns:repeat(4,1fr)}
-  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
-  input, select, textarea{width:100%;padding:10px;background:#0b1220;color:var(--text);border:1px solid #1e293b;border-radius:10px}
-  textarea{min-height:70px;resize:vertical}
-  .btn{background:var(--accent);color:#062;border:none;padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer}
-  .btn.secondary{background:var(--soft);color:var(--text);border:1px solid #253045}
-  .btn.warn{background:var(--warn);color:#211}
-  .btn.danger{background:var(--danger);color:#320}
-  .stat{background:var(--soft);padding:12px;border-radius:12px;border:1px solid #253045}
-  .stat b{font-size:18px;display:block}
-  table{width:100%;border-collapse:separate;border-spacing:0;margin-top:8px}
-  th, td{padding:10px;border-bottom:1px solid #1f2a40;text-align:left;font-size:14px}
-  th{color:#a3b2c2}
-  tr:hover td{background:#0b1220}
-  .pill{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid #263044;font-size:12px;color:#aab6c8}
-  .muted{color:var(--muted)}
-  .right{justify-content:flex-end}
-  .small{font-size:12px}
-  .inline-edit{padding:6px 8px;border:1px dashed #334155;border-radius:6px;background:#0b1220}
-  .kbd{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1220;border:1px solid #1e293b;border-bottom-width:3px;padding:2px 6px;border-radius:6px}
-</style>
-</head>
-<body>
-<header>
-  <div class="wrap">
-    <h1>Fuel & Train</h1>
-    <div class="sub">Local tracker with optional Google Sheets sync and AI macro lookup. Your data can live in a sheet you control.</div>
-    <nav id="tabs"></nav>
-  </div>
-</header>
-<main class="wrap">
-  <section id="view-dashboard" class="view"></section>
-  <section id="view-food" class="view" style="display:none"></section>
-  <section id="view-ex" class="view" style="display:none"></section>
-  <section id="view-data" class="view" style="display:none"></section>
-  <section id="view-settings" class="view" style="display:none"></section>
-  <section id="view-suggest" class="view" style="display:none"></section>
-  <section id="view-meals" class="view" style="display:none"></section>
-</main>
+/** ============================================================================
+ * Fuel & Train Sheets Backend - CLEAN
+ * Tabs expected:
+ *  - Food Log:     id,date,time,item,calories,protein,carbs,fat,notes
+ *  - Activity Log: id,date,type,durationMin,intensity,deviceCalories,avgHR,rpe,notes
+ *  - Meal Plans:   id,name,servings,calories,protein,carbs,fat,items
+ *  - Food Library: id,key,name,brand,serving_desc,calories,protein,carbs,fat,source,last_used,uses
+ *  - Settings:     key,value
+ *
+ * Setup:
+ * 1) Project Settings -> Script properties:
+ *      OPENAI_API_KEY = sk-...
+ * 2) Deploy -> Manage deployments -> Web app
+ *      Execute as: Me
+ *      Who has access: Anyone (or Anyone with link)
+ * 3) Use the /exec URL
+ * ============================================================================ */
 
-<script>
-const APP_VERSION = '1.3.1';
-let SHEETS_ENDPOINT = '';
-let OPENAI_KEY = '';
-let OPENAI_MODEL = 'gpt-4o-mini';
-
-const $ = (s, r=document)=> r.querySelector(s);
-const $$ = (s, r=document)=> Array.from(r.querySelectorAll(s));
-const todayStr = ()=> new Date().toISOString().slice(0,10);
-const toNum = (v,d=0)=> isNaN(parseFloat(v))? d : parseFloat(v);
-const fmt1 = n=> (isFinite(n)? Math.round(n): 0);
-const uid = ()=> Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
-function toast(m){ alert(m); }
-
-// suggestion keyboard-nav state
-let _suggestList = [];
-let _suggestIndex = -1;
-function clearSuggestions(){
-  _suggestList = [];
-  _suggestIndex = -1;
-  renderFoodSuggestions([]);
-}
-function pickSuggestionByIndex(i){
-  if (!_suggestList || _suggestList.length === 0) return;
-  if (i < 0) i = 0;
-  if (i >= _suggestList.length) i = _suggestList.length - 1;
-  _suggestIndex = i;
-  renderFoodSuggestions(_suggestList); // highlight
-  const r = _suggestList[_suggestIndex];
-  $('#f-item').value = r.name || '';
-  $('#f-cal').value  = r.calories || 0;
-  $('#f-prot').value = r.protein  || 0;
-  $('#f-carb').value = r.carbs    || 0;
-  $('#f-fat').value  = r.fat      || 0;
-  const notesEl = $('#f-notes');
-  if (notesEl && r.serving_desc && !notesEl.value) notesEl.value = r.serving_desc;
-}
-function pickActiveSuggestion(){
-  if (_suggestIndex < 0 || !_suggestList.length) return false;
-  const r = _suggestList[_suggestIndex];
-  $('#f-item').value = r.name || '';
-  clearSuggestions();
-  return true;
-}
-
-async function api(action, payload={}){
-  if(!SHEETS_ENDPOINT) throw new Error('No Sheets endpoint configured');
-  const res = await fetch(SHEETS_ENDPOINT, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({action, payload})
-  });
-  if(!res.ok) throw new Error('Sheets API error '+res.status);
-  return res.json();
-}
-
-// Food Library client helpers
-function norm(s){
-  return String(s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
-}
-async function findFoodLibrary(q, limit=8){
-  const res = await api('foodlib.find', { q, limit });
-  if (!res || res.ok === false) return [];
-  return res.results || res.rows || [];
-}
-function renderFoodSuggestions(list){
-  _suggestList = Array.isArray(list) ? list : [];
-  const box = document.getElementById('f-suggest');
-  if (!box) return;
-  if (!_suggestList.length){
-    box.innerHTML = '';
-    return;
-  }
-  const activeIdx = _suggestIndex;
-  box.innerHTML = `
-    <div class="panel" style="padding:8px">
-      <div class="small muted">Matches in your Food Library</div>
-      ${_suggestList.map((r,idx)=>`
-        <div class="row" data-idx="${idx}" style="justify-content:space-between;border-top:1px solid #1f2a40;padding:6px 0;${idx===activeIdx?'outline:2px solid rgba(96,165,250,0.35);border-radius:8px':''}">
-          <div>
-            <div><b>${r.name || ''}</b> ${r.brand ? '· '+r.brand : ''}</div>
-            <div class="muted small">${r.serving_desc || ''}</div>
-          </div>
-          <button class="btn small" data-pick="${r.id}">
-            ${Math.round(r.calories||0)} kcal · ${Math.round(r.protein||0)}P ${Math.round(r.carbs||0)}C ${Math.round(r.fat||0)}F
-          </button>
-        </div>
-      `).join('')}
-    </div>
-  `;
-  // click select
-  box.querySelectorAll('[data-pick]').forEach(btn=>{
-    btn.onclick = ()=>{
-      const id = btn.getAttribute('data-pick');
-      const r = _suggestList.find(x => String(x.id) === String(id));
-      if (!r) return;
-      $('#f-item').value = r.name || '';
-      $('#f-cal').value  = r.calories || 0;
-      $('#f-prot').value = r.protein  || 0;
-      $('#f-carb').value  = r.carbs    || 0;
-      $('#f-fat').value   = r.fat      || 0;
-      const notesEl = $('#f-notes');
-      if (notesEl && r.serving_desc && !notesEl.value) notesEl.value = r.serving_desc;
-      clearSuggestions();
-    };
-  });
-  // hover highlight
-  box.querySelectorAll('[data-idx]').forEach(row=>{
-    row.onmouseenter = ()=>{ _suggestIndex = Number(row.getAttribute('data-idx')); renderFoodSuggestions(_suggestList); };
-  });
-}
-
-const defaultState = {
-  foods: [], exercises: [], meals: [],
-  settings: {
-    bodyWeightKg: 81.6, proteinPerKg: 2.0, ree: 1950, actCalFactor: 0.70,
-    highDayCarb_g_per_kg: 6.0, modDayCarb_g_per_kg: 4.0, lowDayCarb_g_per_kg: 2.5, fat_g_per_kg: 0.8,
-    goal: 'recomp', deficit: 400, glp1: false, dayType: 'moderate', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local',
-    sheetsEndpoint: '', openaiKey: '', openaiModel: 'gpt-4o-mini', dietaryStrategy: 'hexis'
-  },
-  lastSync: null
-};
-function loadState(){ try{ const raw=localStorage.getItem('ft-app-state-v2'); if(!raw) return JSON.parse(JSON.stringify(defaultState)); const s=JSON.parse(raw); s.settings=Object.assign({},defaultState.settings,s.settings||{}); s.foods=s.foods||[]; s.exercises=s.exercises||[]; s.meals=s.meals||[]; return s; }catch{ return JSON.parse(JSON.stringify(defaultState)); } }
-let state = loadState();
-SHEETS_ENDPOINT = state.settings.sheetsEndpoint || '';
-OPENAI_KEY = state.settings.openaiKey || '';
-OPENAI_MODEL = state.settings.openaiModel || 'gpt-4o-mini';
-function saveState(){ localStorage.setItem('ft-app-state-v2', JSON.stringify(state)); }
-
-const tabs = [
-  {id:'dashboard', label:'Dashboard'},{id:'food', label:'Log Food'},{id:'ex', label:'Log Exercise'},
-  {id:'data', label:'Data & Export'},{id:'meals', label:'Meal Plans'},{id:'settings', label:'Settings'},{id:'suggest', label:'Suggestions'}
-];
-function renderTabs(active='dashboard'){
-  const nav = $('#tabs'); nav.innerHTML='';
-  tabs.forEach(t=>{ const b=document.createElement('button'); b.textContent=t.label; b.className = t.id===active? 'active':''; b.onclick=()=>switchView(t.id); nav.appendChild(b); });
-}
-function switchView(id){
-  $$('.view').forEach(v=> v.style.display='none');
-  $(`#view-${id}`).style.display='';
-  renderTabs(id);
-  if(id==='dashboard') renderDashboard();
-  if(id==='food') renderFood();
-  if(id==='ex') renderExercise();
-  if(id==='data') renderData();
-  if(id==='settings') renderSettings();
-  if(id==='suggest') renderSuggest();
-  if(id==='meals') renderMeals();
-}
-
-async function trySync(){
-  if(!SHEETS_ENDPOINT) return;
-  try{
-    const res = await api('bootstrap', {version: APP_VERSION});
-    if(Array.isArray(res.foods)) state.foods = res.foods;
-    if(Array.isArray(res.exercises)) state.exercises = res.exercises;
-    if(Array.isArray(res.meals)) state.meals = res.meals;
-    state.lastSync = new Date().toISOString(); saveState();
-  }catch(e){ console.warn('sync failed', e); }
-}
-async function pushRow(sheet, row){ if(!SHEETS_ENDPOINT) return; try{ await api('upsert',{sheet,row}); }catch(e){ console.warn('pushRow failed', e); } }
-async function deleteRow(sheet, id){ if(!SHEETS_ENDPOINT) return; try{ await api('delete',{sheet,id}); }catch(e){ console.warn('deleteRow failed', e); } }
-
-async function lookupMacrosWithAI(description){
-  if (!SHEETS_ENDPOINT) throw new Error('No backend set. Add your Apps Script Web App URL in Settings.');
-  const url = SHEETS_ENDPOINT + '?action=ai.nutrition&description=' + encodeURIComponent(description || '');
-  const res = await fetch(url, { method: 'GET' });
-  if (!res.ok) throw new Error(`Backend error ${res.status}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'AI lookup failed');
-  return data.result;
-}
-
-function correctedActiveCalories(e){
-  const factor = toNum(state.settings.actCalFactor,0.7);
-  const device = toNum(e.deviceCalories,0);
-  if(device>0) return device * factor;
-  const durH = toNum(e.durationMin,0)/60;
-  const met = {rest:1.2, low:4.0, moderate:7.0, high:10.0}[e.intensity||'moderate'];
-  return met * toNum(state.settings.bodyWeightKg,80) * durH;
-}
-function calcTotals(dateStr){
-  const foods = state.foods.filter(f=> f.date===dateStr);
-  const exs = state.exercises.filter(e=> e.date===dateStr);
-  const calFood = foods.reduce((a,b)=> a+toNum(b.calories),0);
-  const p = foods.reduce((a,b)=> a+toNum(b.protein),0);
-  const c = foods.reduce((a,b)=> a+toNum(b.carbs),0);
-  const f = foods.reduce((a,b)=> a+toNum(b.fat),0);
-  const active = exs.reduce((a,b)=> a+correctedActiveCalories(b),0);
-  return {calFood,p,c,f,active};
-}
-function macroPlan(){
-  const s=state.settings; const bw=toNum(s.bodyWeightKg,80);
-  const protein = Math.max(bw*toNum(s.proteinPerKg,2.0), bw*1.6);
-  let ckg=s.modDayCarb_g_per_kg;
-  if(s.dayType==='high'){ ckg=s.highDayCarb_g_per_kg; }
-  else if(s.dayType==='low'){ ckg=s.lowDayCarb_g_per_kg; }
-  else if(s.dayType==='rest'){ ckg=Math.min(2.0,s.lowDayCarb_g_per_kg); }
-
-  const strat = s.dietaryStrategy || 'none';
-  if (strat === 'hexis') {
-    const exToday = state.exercises.filter(e => e.date === todayStr());
-    const hoursByInt = exToday.reduce((acc,e) => {
-      const h = toNum(e.durationMin,0)/60;
-      let w = 0.0;
-      if(e.intensity==='high'){ w = 2.0; }
-      else if(e.intensity==='moderate'){ w = 1.5; }
-      else if(e.intensity==='low'){ w = 1.0; }
-      acc.load += h * w;
-      acc.h += h;
-      return acc;
-    }, {load:0, h:0});
-    const load = hoursByInt.load;
-    const mapped = 2.0 + Math.min(6.0, load * 2.0);
-    const fallbackMap = {high:7.0, moderate:4.5, low:2.5, rest:2.0};
-    const fallback = (s.dayType in fallbackMap) ? fallbackMap[s.dayType] : 4.0;
-    ckg = Math.max(2.0, Math.min(8.0, (exToday.length ? mapped : fallback)));
-  } else if (strat === 'paleo') {
-    if(ckg > 3.0){ ckg = 3.0; }
-    if(toNum(s.fat_g_per_kg,0.8) < 1.0){ s.fat_g_per_kg = 1.0; }
-  } else if (strat === 'keto') {
-    const carbsFixed = 30;
-    const kcP = protein*4;
-    const actToday = state.exercises.filter(e=> e.date===todayStr()).reduce((a,b)=> a+correctedActiveCalories(b),0);
-    const tdee = toNum(s.ree,1950)+actToday;
-    let target=tdee;
-    if(s.goal==='loss'){ target-=toNum(s.deficit,400); }
-    else if(s.goal==='recomp'){ target-=Math.min(toNum(s.deficit,400),300); }
-    else if(s.goal==='gain'){ target+=200; }
-    const fats = Math.max(bw*toNum(s.fat_g_per_kg,0.8), (target - kcP - carbsFixed*4)/9);
-    return { protein, carbs: carbsFixed, fats, kcalsTarget: target, tdee, actToday };
-  } else if (strat === 'mediterranean') {
-    if(ckg < 3.0){ ckg = 3.0; }
-    if(ckg > 5.0){ ckg = 5.0; }
-    if(toNum(s.fat_g_per_kg,0.8) < 1.0){ s.fat_g_per_kg = 1.0; }
-  }
-
-  const carbs = bw*ckg;
-  const fatsMin=bw*toNum(s.fat_g_per_kg,0.8);
-  const kcP=protein*4, kcC=carbs*4;
-  const actToday = state.exercises.filter(e=> e.date===todayStr()).reduce((a,b)=> a+correctedActiveCalories(b),0);
-  const tdee = toNum(s.ree,1950)+actToday;
-  let target=tdee;
-  if(s.goal==='loss'){ target-=toNum(s.deficit,400); }
-  else if(s.goal==='recomp'){ target-=Math.min(toNum(s.deficit,400),300); }
-  else if(s.goal==='gain'){ target+=200; }
-  const fats = Math.max(fatsMin, (target-kcP-kcC)/9);
-  return {protein, carbs, fats, kcalsTarget: target, tdee, actToday};
-}
-
-function renderDashboard(){
-  const el=$('#view-dashboard'); const d=todayStr(); const totals=calcTotals(d);
-  const tdee = toNum(state.settings.ree,1950)+totals.active;
-  const goal=state.settings.goal; const def=toNum(state.settings.deficit,400);
-  let target=tdee; if(goal==='loss'){ target=tdee-def; } else if(goal==='recomp'){ target=tdee-Math.min(def,300); } else if(goal==='gain'){ target=tdee+200; }
-  const balance = target - totals.calFood;
-  el.innerHTML = `
-    <div class="panel">
-      <div class="row">
-        <div class="stat"><b>${fmt1(totals.calFood)}</b><div class="small muted">Calories eaten</div></div>
-        <div class="stat"><b>${fmt1(totals.p)} g</b><div class="small muted">Protein</div></div>
-        <div class="stat"><b>${fmt1(totals.c)} g</b><div class="small muted">Carbs</div></div>
-        <div class="stat"><b>${fmt1(totals.f)} g</b><div class="small muted">Fat</div></div>
-        <div class="stat"><b>${fmt1(totals.active)}</b><div class="small muted">Corrected active</div></div>
-        <div class="stat"><b>${fmt1(tdee)}</b><div class="small muted">TDEE est.</div></div>
-        <div class="stat"><b>${fmt1(target)}</b><div class="small muted">Target intake</div></div>
-        <div class="stat"><b>${fmt1(balance)}</b><div class="small muted">Remaining</div></div>
-      </div>
-      <div class="small muted">Activity correction factor <span class="kbd">${state.settings.actCalFactor}</span>. Last sync: ${state.lastSync || 'local only'}</div>
-    </div>
-
-    <div class="panel">
-      <h3 class="small">Quick add food</h3>
-      <div class="grid g4">
-        <div><label>Food item</label><input id="qa-food" placeholder="Turkey sandwich on sourdough"></div>
-        <div><label>Calories</label><input id="qa-cal" type="number"></div>
-        <div><label>Protein (g)</label><input id="qa-prot" type="number" step="0.1"></div>
-        <div><label>Carbs (g)</label><input id="qa-carb" type="number" step="0.1"></div>
-        <div><label>Fat (g)</label><input id="qa-fat" type="number" step="0.1"></div>
-        <div class="row">
-          <button class="btn secondary" id="qa-ai">Lookup macros with AI</button>
-          <span class="small muted">Requires OpenAI key in Settings</span>
-        </div>
-        <div class="row right">
-          <button class="btn" id="qa-add">Add food</button>
-          <button class="btn secondary" onclick="switchView('food')">Open Food Log</button>
-        </div>
-      </div>
-    </div>
-  `;
-  $('#qa-ai').onclick = async ()=>{
-    try{
-      const desc=$('#qa-food').value.trim(); if(!desc){ toast('Enter a food description'); return; }
-      const r=await lookupMacrosWithAI(desc);
-      $('#qa-cal').value=r.calories||''; $('#qa-prot').value=r.protein||''; $('#qa-carb').value=r.carbs||''; $('#qa-fat').value=r.fat||'';
-    }catch(e){ toast(e.message); }
-  };
-  $('#qa-add').onclick = ()=>{
-    const food={ id:uid(), date:todayStr(), time:new Date().toTimeString().slice(0,5), item:$('#qa-food').value.trim()||'Food',
-      calories:toNum($('#qa-cal').value,0), protein:toNum($('#qa-prot').value,0), carbs:toNum($('#qa-carb').value,0), fat:toNum($('#qa-fat').value,0), notes:'' };
-    state.foods.push(food); saveState(); if(SHEETS_ENDPOINT) pushRow('Food Log', food); renderDashboard();
-  };
-}
-
-function renderFood(){
-  const el=$('#view-food');
-  el.innerHTML = `
-    <div class="panel">
-      <h3 class="small">Add Food</h3>
-      <div class="grid g4">
-        <div><label>Date</label><input id="f-date" type="date" value="${todayStr()}"></div>
-        <div><label>Time</label><input id="f-time" type="time" value="${new Date().toTimeString().slice(0,5)}"></div>
-        <div class="g3" style="grid-column: span 2">
-          <div><label>Item</label><input id="f-item"></div>
-          <div id="f-suggest" class="small" style="grid-column: 1 / -1; margin-top: 6px; border:1px dashed #334155; border-radius:8px;"></div>
-          <div><label>Calories</label><input id="f-cal" type="number"></div>
-          <div><label>Protein (g)</label><input id="f-prot" type="number" step="0.1"></div>
-          <div><label>Carbs (g)</label><input id="f-carb" type="number" step="0.1"></div>
-          <div><label>Fat (g)</label><input id="f-fat" type="number" step="0.1"></div>
-        </div>
-        <div style="grid-column: span 4"><label>Notes</label><textarea id="f-notes"></textarea></div>
-
-        <div class="panel" style="grid-column: span 4; margin-top:12px">
-          <div class="row">
-            <div style="flex:1">
-              <label>From Meal Plan</label>
-              <select id="f-mealpick">
-                <option value="">Pick a saved meal…</option>
-              </select>
-            </div>
-            <button class="btn secondary" id="f-meal-apply">Apply to form</button>
-            <button class="btn secondary" id="f-meal-add">Add as entry</button>
-          </div>
-          <div class="small muted">Apply fills the fields. Add inserts a Food Log row for this meal.</div>
-        </div>
-
-      </div>
-      <div class="row">
-        <button class="btn secondary" id="f-ai">Lookup macros with AI</button>
-        <button class="btn" id="f-add">Add</button>
-      </div>
-    </div>
-
-    <div class="panel">
-      <h3 class="small">Food Entries</h3>
-      <div class="row">
-        <label>Filter date</label>
-        <input id="f-filter" type="date" value="${todayStr()}" style="max-width:200px">
-        <button class="btn secondary" id="f-clear">All</button>
-        <button class="btn secondary" id="f-sync">Sync from Sheets</button>
-      </div>
-      <div id="f-table"></div>
-    </div>
-  `;
-
-  // AI lookup
-  $('#f-ai').onclick = async ()=>{
-    try{
-      const desc=$('#f-item').value.trim(); if(!desc){ toast('Enter a food description'); return; }
-      const r=await lookupMacrosWithAI(desc);
-      $('#f-cal').value=r.calories||''; $('#f-prot').value=r.protein||''; $('#f-carb').value=r.carbs||''; $('#f-fat').value=r.fat||'';
-    }catch(e){ toast(e.message); }
-  };
-
-  // Add food and upsert to Food Library
-  $('#f-add').onclick = async ()=>{
-    const row = {
-      id: uid(),
-      date: $('#f-date').value || todayStr(),
-      time: $('#f-time').value || '00:00',
-      item: $('#f-item').value.trim() || 'Food',
-      calories: toNum($('#f-cal').value,0),
-      protein: toNum($('#f-prot').value,0),
-      carbs: toNum($('#f-carb').value,0),
-      fat: toNum($('#f-fat').value,0),
-      notes: $('#f-notes').value.trim()
-    };
-    state.foods.push(row); 
-    saveState();
-    if (SHEETS_ENDPOINT) {
-      pushRow('Food Log', row);
-      api('foodlib.upsert', { row:{
-        name: row.item,
-        serving_desc: row.notes || '',
-        calories: row.calories, protein: row.protein, carbs: row.carbs, fat: row.fat,
-        source: 'food_log'
-      }}).catch(()=>{});
+// ---------- HTTP ----------
+function doGet(e) {
+  try {
+    var action = (e && e.parameter && e.parameter.action) ? String(e.parameter.action) : '';
+    if (action === 'ai.nutrition') {
+      var desc = (e.parameter && e.parameter.description) ? String(e.parameter.description) : '';
+      return json_({ ok: true, result: aiNutrition_(desc) });
     }
-    renderFood();
-  };
-
-  // Meal picker populate and actions
-  const mealSel = $('#f-mealpick');
-  if (mealSel) {
-    const meals = (state.meals || []).slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
-    meals.forEach(m=>{
-      const opt = document.createElement('option');
-      opt.value = m.id;
-      opt.textContent = `${m.name || 'Meal'} • ${fmt1(m.calories||0)} kcal · ${fmt1(m.protein||0)}P ${fmt1(m.carbs||0)}C ${fmt1(m.fat||0)}F`;
-      mealSel.appendChild(opt);
-    });
+    return json_({ ok: true, ts: new Date().toISOString() });
+  } catch (err) {
+    return json_({ ok: false, error: String(err) });
   }
-  function getMealById(id){ return (state.meals || []).find(m=> String(m.id) === String(id)); }
-  $('#f-meal-apply').onclick = ()=>{
-    const chosen = getMealById($('#f-mealpick').value);
-    if (!chosen) { toast('Pick a meal'); return; }
-    $('#f-item').value = chosen.name || 'Meal';
-    $('#f-cal').value  = toNum(chosen.calories,0);
-    $('#f-prot').value = toNum(chosen.protein,0);
-    $('#f-carb').value = toNum(chosen.carbs,0);
-    $('#f-fat').value  = toNum(chosen.fat,0);
-    const notesEl = $('#f-notes');
-    if (notesEl && chosen.items && !notesEl.value) notesEl.value = chosen.items;
-  };
-  $('#f-meal-add').onclick = async ()=>{
-    const chosen = getMealById($('#f-mealpick').value);
-    if (!chosen) { toast('Pick a meal'); return; }
-    const row = {
-      id: uid(),
-      date: $('#f-date').value || todayStr(),
-      time: $('#f-time').value || '00:00',
-      item: chosen.name || 'Meal',
-      calories: toNum(chosen.calories,0),
-      protein: toNum(chosen.protein,0),
-      carbs: toNum(chosen.carbs,0),
-      fat: toNum(chosen.fat,0),
-      notes: chosen.items || ''
-    };
-    state.foods.push(row); saveState();
-    if (SHEETS_ENDPOINT) {
-      pushRow('Food Log', row);
-      api('foodlib.upsert', { row:{
-        name: row.item,
-        serving_desc: row.notes || '',
-        calories: row.calories, protein: row.protein, carbs: row.carbs, fat: row.fat,
-        source: 'meal_plan'
-      }}).catch(()=>{});
+}
+
+function doPost(e) {
+  try {
+    var action = (e.parameter && e.parameter.action) || '';
+    var payload = {};
+    if (e.postData && e.postData.contents) {
+      try { var body = JSON.parse(e.postData.contents); action = action || body.action || ''; payload = body.payload || {}; }
+      catch (_) { payload = { sheet:(e.parameter && e.parameter.sheet)||'', row:(e.parameter && e.parameter.row)||'', id:(e.parameter && e.parameter.id)||'' }; }
     }
-    renderFood();
-  };
 
-  // Table controls
-  $('#f-clear').onclick = ()=>{ $('#f-filter').value=''; renderFoodTable(); };
-  $('#f-sync').onclick = trySync;
-  $('#f-filter').onchange = renderFoodTable;
-  renderFoodTable();
+    if (action === 'bootstrap') {
+      return json_({
+        ok: true,
+        foods: readRows_('Food Log'),
+        exercises: readRows_('Activity Log'),
+        meals: readRows_('Meal Plans'),
+        settingsKV: readSettings_()
+      });
+    }
+    if (action === 'upsert') { upsertRow_(payload.sheet, payload.row); return json_({ ok: true }); }
+    if (action === 'delete') { deleteById_(payload.sheet, payload.id); return json_({ ok: true }); }
+    if (action === 'list')   { return json_({ ok: true, rows: readRows_(payload.sheet) }); }
+    if (action === 'settings.get') { return json_({ ok: true, settings: readSettings_() }); }
+    if (action === 'settings.set') { setSettings_(payload.kv || {}); return json_({ ok: true }); }
 
-  // Typeahead on Item
-  const fItem = document.getElementById('f-item');
-  let suggestTimer = 0;
-  fItem.addEventListener('input', ()=>{
-    clearTimeout(suggestTimer);
-    _suggestIndex = -1; // reset highlight
-    const q = fItem.value.trim();
-    if (q.length < 2) { clearSuggestions(); return; }
-    suggestTimer = setTimeout(async ()=>{
-      try {
-        const hits = await findFoodLibrary(q, 8);
-        console.debug('foodlib.find hits for', q, hits);
-        renderFoodSuggestions(hits);
-      } catch {
-        clearSuggestions();
-      }
-    }, 180);
-  });
-  fItem.addEventListener('keydown', (ev)=>{
-    if (!_suggestList || _suggestList.length === 0) return;
-    if (ev.key === 'ArrowDown') { ev.preventDefault(); pickSuggestionByIndex((_suggestIndex < 0 ? 0 : _suggestIndex + 1)); }
-    else if (ev.key === 'ArrowUp') { ev.preventDefault(); pickSuggestionByIndex((_suggestIndex <= 0 ? 0 : _suggestIndex - 1)); }
-    else if (ev.key === 'Enter') { if (pickActiveSuggestion()) ev.preventDefault(); }
-    else if (ev.key === 'Escape') { clearSuggestions(); }
-  });
-}
+    if (action === 'foodlib.find') { return json_({ ok: true, results: foodLibFind_(payload.q || '', payload.limit || 8) }); }
+    if (action === 'foodlib.upsert'){ return json_({ ok: true, row: foodLibUpsert_(payload.row || {}) }); }
 
-function renderFoodTable(){
-  const container=$('#f-table'); const filter=$('#f-filter').value;
-  const rows=state.foods.filter(r=> !filter || r.date===filter);
-  const total=rows.reduce((a,b)=>{a.cal+=toNum(b.calories);a.p+=toNum(b.protein);a.c+=toNum(b.carbs);a.f+=toNum(b.fat);return a;},{cal:0,p:0,c:0,f:0});
-  container.innerHTML = `
-    <div class="row">
-      <div class="pill">Entries: ${rows.length}</div>
-      <div class="pill">Calories: ${fmt1(total.cal)}</div>
-      <div class="pill">Protein: ${fmt1(total.p)}g</div>
-      <div class="pill">Carbs: ${fmt1(total.c)}g</div>
-      <div class="pill">Fat: ${fmt1(total.f)}g</div>
-    </div>
-    <table>
-      <thead><tr><th>Date</th><th>Time</th><th>Item</th><th>Cal</th><th>P</th><th>C</th><th>F</th><th>Notes</th><th></th></tr></thead>
-      <tbody>
-        ${rows.map(r=>`
-          <tr>
-            ${['date','time','item','calories','protein','carbs','fat','notes'].map(k=>`<td contenteditable class="inline-edit" data-id="${r.id}" data-field="${k}">${r[k] ?? ''}</td>`).join('')}
-            <td><button class="btn danger small" data-del="${r.id}">Del</button></td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
-    <div class="small muted">Edit cells to update. Saves on blur. Deletes sync to Sheets if configured.</div>
-  `;
-  $$('#f-table [contenteditable]').forEach(cell=>{
-    cell.addEventListener('blur', ()=>{
-      const id=cell.dataset.id, field=cell.dataset.field;
-      const row=state.foods.find(x=> x.id===id); if(!row) return;
-      row[field]=['calories','protein','carbs','fat'].includes(field)? toNum(cell.textContent.trim(),0): cell.textContent.trim();
-      saveState(); if(SHEETS_ENDPOINT) pushRow('Food Log', row); renderFoodTable();
-    });
-  });
-  $$('#f-table [data-del]').forEach(btn=>{
-    btn.onclick = ()=>{
-      const id=btn.getAttribute('data-del');
-      state.foods = state.foods.filter(x=> x.id!==id); saveState();
-      if(SHEETS_ENDPOINT) deleteRow('Food Log', id);
-      renderFoodTable();
-    };
-  });
-}
-
-function renderExercise(){
-  const el=$('#view-ex');
-  el.innerHTML = `
-    <div class="panel">
-      <h3 class="small">Add Exercise</h3>
-      <div class="grid g4">
-        <div><label>Date</label><input id="e-date" type="date" value="${todayStr()}"></div>
-        <div><label>Type</label>
-          <select id="e-type">
-            <option>Cycling - Road</option><option>Cycling - MTB</option><option>Cycling - Gravel</option>
-            <option>Run</option><option>Walk</option><option>Strength</option><option>Other</option>
-          </select>
-        </div>
-        <div><label>Duration (min)</label><input id="e-dur" type="number"></div>
-        <div><label>Intensity</label>
-          <select id="e-int"><option value="rest">Rest</option><option value="low">Low</option><option value="moderate" selected>Moderate</option><option value="high">High</option></select>
-        </div>
-        <div><label>Device calories (kcal)</label><input id="e-dev" type="number"></div>
-        <div><label>Avg HR</label><input id="e-hr" type="number"></div>
-        <div><label>RPE (1-10)</label><input id="e-rpe" type="number"></div>
-        <div><label>Notes</label><input id="e-notes"></div>
-      </div>
-      <div class="row right"><button class="btn" id="e-add">Add</button></div>
-    </div>
-
-    <div class="panel">
-      <h3 class="small">Exercise Entries</h3>
-      <div class="row">
-        <label>Filter date</label>
-        <input id="e-filter" type="date" value="${todayStr()}" style="max-width:200px">
-        <button class="btn secondary" id="e-clear">All</button>
-        <button class="btn secondary" id="e-sync">Sync from Sheets</button>
-      </div>
-      <div id="e-table"></div>
-    </div>
-  `;
-  $('#e-add').onclick = ()=>{
-    const e={ id:uid(), date:$('#e-date').value||todayStr(), type:$('#e-type').value, durationMin:toNum($('#e-dur').value,0),
-      intensity:$('#e-int').value, deviceCalories:toNum($('#e-dev').value,0), avgHR:toNum($('#e-hr').value,0), rpe:toNum($('#e-rpe').value,0), notes:$('#e-notes').value.trim() };
-    state.exercises.push(e); saveState(); if(SHEETS_ENDPOINT) pushRow('Activity Log', e); renderExercise();
-  };
-  $('#e-clear').onclick = ()=>{ $('#e-filter').value=''; renderExerciseTable(); };
-  $('#e-sync').onclick = trySync;
-  $('#e-filter').onchange = renderExerciseTable;
-  renderExerciseTable();
-}
-function renderExerciseTable(){
-  const container=$('#e-table'); const filter=$('#e-filter').value;
-  const rows=state.exercises.filter(r=> !filter || r.date===filter);
-  const totalActive = rows.reduce((a,b)=> a+correctedActiveCalories(b),0);
-  container.innerHTML = `
-    <div class="row"><div class="pill">Entries: ${rows.length}</div><div class="pill">Corrected active kcals: ${fmt1(totalActive)}</div></div>
-    <table>
-      <thead><tr><th>Date</th><th>Type</th><th>Dur</th><th>Int</th><th>Device kcal</th><th>Avg HR</th><th>RPE</th><th>Notes</th><th>Adj kcal</th><th></th></tr></thead>
-      <tbody>
-        ${rows.map(r=>`
-          <tr>
-            ${['date','type','durationMin','intensity','deviceCalories','avgHR','rpe','notes'].map(k=>`<td contenteditable class="inline-edit" data-exid="${r.id}" data-field="${k}">${r[k] ?? ''}</td>`).join('')}
-            <td>${fmt1(correctedActiveCalories(r))}</td>
-            <td><button class="btn danger small" data-del="${r.id}">Del</button></td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
-    <div class="small muted">Edit saves on blur. Activity correction factor applies.</div>
-  `;
-  $$('#e-table [contenteditable]').forEach(cell=>{
-    cell.addEventListener('blur', ()=>{
-      const id=cell.dataset.exid, field=cell.dataset.field;
-      const row=state.exercises.find(x=> x.id===id); if(!row) return;
-      const numeric=['durationMin','deviceCalories','avgHR','rpe'].includes(field);
-      row[field]=numeric? toNum(cell.textContent.trim(),0): cell.textContent.trim();
-      saveState(); if(SHEETS_ENDPOINT) pushRow('Activity Log', row); renderExerciseTable();
-    });
-  });
-  $$('#e-table [data-del]').forEach(btn=>{
-    btn.onclick = ()=>{
-      const id=btn.getAttribute('data-del');
-      state.exercises = state.exercises.filter(x=> x.id!==id); saveState();
-      if(SHEETS_ENDPOINT) deleteRow('Activity Log', id);
-      renderExerciseTable();
-    };
-  });
-}
-
-function renderMeals(){
-  const el=$('#view-meals');
-  el.innerHTML = `
-    <div class="panel">
-      <h3 class="small">Save a Meal</h3>
-      <div class="grid g4">
-        <div><label>Name</label><input id="m-name" placeholder="Greek yogurt bowl"></div>
-        <div><label>Servings</label><input id="m-serv" type="number" step="0.1" value="1"></div>
-        <div><label>Calories</label><input id="m-cal" type="number"></div>
-        <div><label>P</label><input id="m-p" type="number" step="0.1"></div>
-        <div><label>C</label><input id="m-c" type="number" step="0.1"></div>
-        <div><label>F</label><input id="m-f" type="number" step="0.1"></div>
-        <div style="grid-column: span 4"><label>Items (JSON or notes)</label><textarea id="m-items" placeholder='[{"item":"yogurt","g":170}] or notes'></textarea></div>
-      </div>
-      <div class="row"><button class="btn secondary" id="m-ai">AI estimate macros</button><button class="btn" id="m-save">Save meal</button></div>
-    </div>
-    <div class="panel"><h3 class="small">Meal Library</h3><div id="m-list"></div></div>
-  `;
-  $('#m-ai').onclick = async ()=>{
-    try{
-      const name=$('#m-name').value.trim(); if(!name){ toast('Enter a meal name or description'); return; }
-      const r=await lookupMacrosWithAI(name);
-      $('#m-cal').value=r.calories||''; $('#m-p').value=r.protein||''; $('#m-c').value=r.carbs||''; $('#m-f').value=r.fat||'';
-    }catch(e){ toast(e.message); }
-  };
-  $('#m-save').onclick = ()=>{
-    const meal={ id:uid(), name:$('#m-name').value.trim()||'Meal', servings:toNum($('#m-serv').value,1), calories:toNum($('#m-cal').value,0),
-      protein:toNum($('#m-p').value,0), carbs:toNum($('#m-c').value,0), fat:toNum($('#m-f').value,0), items:$('#m-items').value.trim() };
-    state.meals.push(meal); saveState(); if(SHEETS_ENDPOINT) pushRow('Meal Plans', meal); renderMeals();
-  };
-  renderMealList();
-}
-function renderMealList(){
-  const el=$('#m-list'); const rows=state.meals;
-  el.innerHTML = `
-    <table>
-      <thead><tr><th>Name</th><th>Servings</th><th>Cal</th><th>P</th><th>C</th><th>F</th><th>Items</th><th></th></tr></thead>
-      <tbody>
-        ${rows.map(r=>`
-          <tr>
-            ${['name','servings','calories','protein','carbs','fat','items'].map(k=>`<td contenteditable class="inline-edit" data-id="${r.id}" data-field="${k}">${r[k] ?? ''}</td>`).join('')}
-            <td><button class="btn danger small" data-del="${r.id}">Del</button></td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
-  `;
-  $$('#m-list [contenteditable]').forEach(cell=>{
-    cell.addEventListener('blur', ()=>{
-      const id=cell.dataset.id, field=cell.dataset.field;
-      const row=state.meals.find(x=> x.id===id); if(!row) return;
-      const numeric=['servings','calories','protein','carbs','fat'].includes(field);
-      row[field]=numeric? toNum(cell.textContent.trim(),0): cell.textContent.trim();
-      saveState(); if(SHEETS_ENDPOINT) pushRow('Meal Plans', row); renderMealList();
-    });
-  });
-  $$('#m-list [data-del]').forEach(btn=>{
-    btn.onclick = ()=>{
-      const id=btn.getAttribute('data-del');
-      state.meals = state.meals.filter(x=> x.id!==id); saveState();
-      if(SHEETS_ENDPOINT) deleteRow('Meal Plans', id);
-      renderMealList();
-    };
-  });
-}
-
-function toCSV(rows, headers){
-  const h=headers||Object.keys(rows[0]||{});
-  const esc=v=>{ if(v==null) return ''; const s=String(v); return /[",\n]/.test(s)? '"'+s.replace(/"/g,'""')+'"' : s; };
-  const lines=[h.join(',')]; rows.forEach(r=> lines.push(h.map(k=> esc(r[k])).join(','))); return lines.join('\n');
-}
-function renderData(){
-  const el=$('#view-data');
-  const foodsCSV=toCSV(state.foods,['id','date','time','item','calories','protein','carbs','fat','notes']);
-  const exCSV=toCSV(state.exercises,['id','date','type','durationMin','intensity','deviceCalories','avgHR','rpe','notes']);
-  const mealsCSV=toCSV(state.meals,['id','name','servings','calories','protein','carbs','fat','items']);
-  el.innerHTML = `
-    <div class="panel">
-      <h3 class="small">Export</h3>
-      <div class="row">
-        <button class="btn" id="exp-food">Food CSV</button>
-        <button class="btn" id="exp-ex">Exercise CSV</button>
-        <button class="btn" id="exp-meals">Meals CSV</button>
-        <button class="btn secondary" id="exp-json">Full JSON</button>
-      </div>
-    </div>
-    <div class="panel">
-      <h3 class="small">Import</h3>
-      <div class="row">
-        <input type="file" id="imp-file" accept=".csv,.json" />
-        <select id="imp-target">
-          <option value="auto">Auto-detect</option>
-          <option value="foods">Foods</option>
-          <option value="exercises">Exercises</option>
-          <option value="meals">Meals</option>
-          <option value="state">Full state (JSON)</option>
-        </select>
-        <button class="btn" id="imp-run">Import</button>
-      </div>
-    </div>
-  `;
-  function download(name,text){ const a=document.createElement('a'); a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(text); a.download=name; a.style.display='none'; document.body.appendChild(a); a.click(); a.remove(); }
-  $('#exp-food').onclick = ()=> download(`foods_${todayStr()}.csv`, foodsCSV);
-  $('#exp-ex').onclick = ()=> download(`exercises_${todayStr()}.csv`, exCSV);
-  $('#exp-meals').onclick = ()=> download(`meals_${todayStr()}.csv`, mealsCSV);
-  $('#exp-json').onclick = ()=> download(`ft_backup_${Date.now()}.json`, JSON.stringify(state,null,2));
-
-  $('#imp-run').onclick = ()=>{
-    const file=$('#imp-file').files[0]; if(!file){ toast('Choose a file'); return; }
-    const reader=new FileReader();
-    reader.onload=()=>{
-      const text=reader.result; const target=$('#imp-target').value;
-      try{
-        if(file.name.endsWith('.json') || target==='state'){ const obj=JSON.parse(text); state=Object.assign({},state,obj); saveState(); toast('Imported JSON'); location.reload(); return; }
-        const lines=text.split(/\r?\n/).filter(Boolean); const headers=lines.shift().split(',');
-        const parseRow=line=>{ const cells=[]; let cur='',q=false; for(let i=0;i<line.length;i++){ const ch=line[i]; if(q){ if(ch==='\"' && line[i+1]==='\"'){cur+='\"';i++;} else if(ch==='\"'){q=false;} else {cur+=ch;} } else { if(ch===','){cells.push(cur);cur='';} else if(ch==='\"'){q=true;} else {cur+=ch;} } } cells.push(cur); const obj={}; headers.forEach((h,idx)=> obj[h]=cells[idx]??''); return obj; };
-        const rows = lines.map(parseRow);
-        if(target==='foods' || (target==='auto' && headers.includes('item') && headers.includes('calories'))){
-          state.foods = rows.map(r=>({id:r.id||uid(),date:r.date||todayStr(),time:r.time||'00:00',item:r.item||'',calories:toNum(r.calories,0),protein:toNum(r.protein,0),carbs:toNum(r.carbs,0),fat:toNum(r.fat,0),notes:r.notes||''}));
-        } else if(target==='exercises' || (target==='auto' && headers.includes('durationMin') && headers.includes('intensity'))){
-          state.exercises = rows.map(r=>({id:r.id||uid(),date:r.date||todayStr(),type:r.type||'Other',durationMin:toNum(r.durationMin,0),intensity:toNum(r.intensity,0)||r.intensity||'moderate',deviceCalories:toNum(r.deviceCalories,0),avgHR:toNum(r.avgHR,0),rpe:toNum(r.rpe,0),notes:r.notes||''}));
-        } else if(target==='meals' || (target==='auto' && headers.includes('servings') && headers.includes('calories') && headers.includes('name'))){
-          state.meals = rows.map(r=>({id:r.id||uid(),name:r.name||'Meal',servings:toNum(r.servings,1),calories:toNum(r.calories,0),protein:toNum(r.protein,0),carbs:toNum(r.carbs,0),fat:toNum(r.fat,0),items:r.items||''}));
-        } else { toast('CSV not recognized'); return; }
-        saveState(); toast('Imported'); location.reload();
-      }catch(e){ toast('Import failed '+e.message); }
-    };
-    reader.readAsText(file);
-  };
-}
-
-function renderSettings(){
-  const s=state.settings; const el=$('#view-settings');
-  el.innerHTML = `
-    <div class="panel">
-      <h3 class="small">Core Settings</h3>
-      <div class="grid g4">
-        <div><label>Body weight (kg)</label><input id="s-bw" type="number" step="0.1" value="${s.bodyWeightKg}"></div>
-        <div><label>Protein target (g/kg)</label><input id="s-ppk" type="number" step="0.1" value="${s.proteinPerKg}"></div>
-        <div><label>REE (kcal)</label><input id="s-ree" type="number" value="${s.ree}"></div>
-        <div><label>Activity correction factor</label><input id="s-fact" type="number" step="0.01" value="${s.actCalFactor}"></div>
-        <div><label>Day type</label>
-          <select id="s-day">
-            <option value="rest" ${s.dayType==='rest'?'selected':''}>Rest</option>
-            <option value="low" ${s.dayType==='low'?'selected':''}>Low</option>
-            <option value="moderate" ${s.dayType==='moderate'?'selected':''}>Moderate</option>
-            <option value="high" ${s.dayType==='high'?'selected':''}>High</option>
-          </select>
-        </div>
-        <div><label>Goal</label>
-          <select id="s-goal">
-            <option value="loss" ${s.goal==='loss'?'selected':''}>Fat loss</option>
-            <option value="maintain" ${s.goal==='maintain'?'selected':''}>Maintain</option>
-            <option value="gain" ${s.goal==='gain'?'selected':''}>Gain</option>
-            <option value="recomp" ${s.goal==='recomp'?'selected':''}>Recomp</option>
-          </select>
-        </div>
-        <div><label>Deficit when loss/recomp</label><input id="s-def" type="number" value="${s.deficit}"></div>
-        <div><label>GLP-1 user</label>
-          <select id="s-glp1"><option value="false" ${!s.glp1?'selected':''}>No</option><option value="true" ${s.glp1?'selected':''}>Yes</option></select>
-        </div>
-      </div>
-    </div>
-    <div class="panel">
-      <h3 class="small">Diet Strategy</h3>
-      <div class="grid g4">
-        <div>
-          <label>Strategy</label>
-          <select id="s-strategy">
-            <option value="none" ${s.dietaryStrategy==='none'?'selected':''}>None</option>
-            <option value="hexis" ${s.dietaryStrategy==='hexis'?'selected':''}>Hexis (carb periodization)</option>
-            <option value="paleo" ${s.dietaryStrategy==='paleo'?'selected':''}>Paleo</option>
-            <option value="keto" ${s.dietaryStrategy==='keto'?'selected':''}>Keto</option>
-            <option value="mediterranean" ${s.dietaryStrategy==='mediterranean'?'selected':''}>Mediterranean</option>
-          </select>
-        </div>
-        <div style="grid-column: span 3">
-          <div class="small muted">Hexis uses today’s training load to set carbs per kg. Others adjust ranges accordingly.</div>
-        </div>
-      </div>
-    </div>
-    <div class="panel">
-      <h3 class="small">Integrations</h3>
-      <div class="grid g4">
-        <div style="grid-column: span 2"><label>Google Sheets Web App URL</label><input id="s-sheet" placeholder="https://script.google.com/macros/s/.../exec" value="${s.sheetsEndpoint||''}"></div>
-        <div><label>OpenAI API Key</label><input id="s-openai" placeholder="sk-..." value="${s.openaiKey||''}"></div>
-        <div><label>OpenAI Model</label><input id="s-model" value="${s.openaiModel||OPENAI_MODEL}"></div>
-      </div>
-      <div class="row right"><button class="btn" id="s-save">Save settings</button><button class="btn secondary" id="s-sync">Pull from Sheets</button></div>
-      <div class="small muted">Paste your Apps Script Web App URL to sync. Paste your OpenAI key to enable AI macro lookup.</div>
-    </div>
-  `;
-  $('#s-save').onclick = ()=>{
-    s.bodyWeightKg=toNum($('#s-bw').value,s.bodyWeightKg); s.proteinPerKg=toNum($('#s-ppk').value,s.proteinPerKg); s.ree=toNum($('#s-ree').value,s.ree);
-    s.actCalFactor=toNum($('#s-fact').value,s.actCalFactor); s.dayType=$('#s-day').value; s.goal=$('#s-goal').value; s.deficit=toNum($('#s-def').value,s.deficit);
-    s.glp1=$('#s-glp1').value==='true'; s.dietaryStrategy=$('#s-strategy')? $('#s-strategy').value : (s.dietaryStrategy||'none');
-    s.sheetsEndpoint=$('#s-sheet').value.trim(); s.openaiKey=$('#s-openai').value.trim(); s.openaiModel=$('#s-model').value.trim()||'gpt-4o-mini';
-    SHEETS_ENDPOINT=s.sheetsEndpoint; OPENAI_KEY=s.openaiKey; OPENAI_MODEL=s.openaiModel; saveState(); toast('Saved');
-  };
-  $('#s-sync').onclick = trySync;
-}
-
-function renderSuggest(){
-  const el=$('#view-suggest'); const mp=macroPlan();
-  const strat = (state.settings && state.settings.dietaryStrategy) || 'none';
-  let stratNote = '';
-  if(strat==='hexis'){ stratNote='Hexis preset active: carbs scale with today’s training load.'; }
-  else if(strat==='paleo'){ stratNote='Paleo preset active: carbs moderated, fats slightly higher.'; }
-  else if(strat==='keto'){ stratNote='Keto preset active: about 30 g carbs per day; fats fill remaining calories.'; }
-  else if(strat==='mediterranean'){ stratNote='Mediterranean preset active: balanced carbs and fats.'; }
-
-  let hexLine = '';
-  if(strat==='hexis'){
-    const targetC = Math.max(0, mp.carbs || 0);
-    const pre = Math.round(targetC * 0.25);
-    const during = Math.round(targetC * 0.35);
-    const post = Math.round(targetC * 0.15);
-    const rest = Math.max(0, targetC - pre - during - post);
-    hexLine = '<li><b>Hexis split:</b> Pre ~' + pre + ' g • During ~' + during + ' g • Post ~' + post + ' g • Rest of day ~' + rest + ' g</li>';
+    return json_({ ok:false, error:'Unknown action: ' + action });
+  } catch (err) {
+    return json_({ ok:false, error:String(err) });
   }
-
-  const eaten=state.foods.filter(f=> f.date===todayStr()).reduce((a,f)=>{a.kcal+=toNum(f.calories,0);a.p+=toNum(f.protein,0);a.c+=toNum(f.carbs,0);a.f+=toNum(f.fat,0);return a;},{kcal:0,p:0,c:0,f:0});
-  const left = {kcal: mp.kcalsTarget - eaten.kcal, p: mp.protein - eaten.p, c: mp.carbs - eaten.c, f: mp.fats - eaten.f};
-  const dt=state.settings.dayType;
-  let timing=[]; if(dt==='high'){ timing=["Pre 2-3h: 1-1.5 g/kg carbs + lean protein, low fat","During: 60-90 g carbs/h if over 90 min, sodium 500-800 mg/h","Post 0-2h: 0.6-1.0 g/kg carbs + 30-50 g protein"]; }
-  else if(dt==='moderate'){ timing=["Pre 1-2h: about 0.8 g/kg carbs + 25-35 g protein","During: 30-60 g carbs/h if over 60 min","Post: 0.4-0.8 g/kg carbs + 30-40 g protein"]; }
-  else { timing=["Protein-forward meals","Place most carbs around training","Hydrate and salt as needed"]; }
-
-  const glp1Tips = state.settings.glp1? ["Smaller, more frequent meals","Front-load protein earlier in day","Hydrate on waking before first food","Keep ultra-fatty foods moderate if nausea-prone"] : [];
-
-  el.innerHTML = `
-    <div class="panel">
-      <div class="row">
-        <div class="stat"><b>${fmt1(mp.kcalsTarget)}</b><div class="small muted">Target kcal</div></div>
-        <div class="stat"><b>${fmt1(mp.protein)} g</b><div class="small muted">Protein</div></div>
-        <div class="stat"><b>${fmt1(mp.carbs)} g</b><div class="small muted">Carbs (${state.settings.dayType})</div></div>
-        <div class="stat"><b>${fmt1(mp.fats)} g</b><div class="small muted">Fat</div></div>
-      </div>
-      <div class="row"><div class="pill">Eaten: ${fmt1(eaten.kcal)} kcal, ${fmt1(eaten.p)}P/${fmt1(eaten.c)}C/${fmt1(eaten.f)}F</div><div class="pill">Remaining: ${fmt1(left.kcal)} kcal, ${fmt1(left.p)}P/${fmt1(left.c)}C/${fmt1(left.f)}F</div></div>
-    </div>
-    <div class="panel">
-      <h3 class="small">Actionable suggestions</h3>
-      <ul class="small">
-        <li><b>Strategy:</b> ${stratNote}</li>
-        ${hexLine}
-        <li><b>Fueling timing:</b> ${timing.join(' • ')}</li>
-        <li><b>Protein floor:</b> close ${fmt1(mp.protein)} g by dinner. Add a 30-40 g protein snack if behind.</li>
-        ${state.settings.glp1 ? `<li><b>GLP-1 adjustments:</b> ${glp1Tips.join(' • ')}</li>` : ''}
-        <li><b>Electrolytes:</b> 500-800 mg sodium per hour in heat or heavy sweat.</li>
-      </ul>
-    </div>
-  `;
 }
 
-renderTabs(); switchView('dashboard'); trySync();
-</script>
-</body>
-</html>
+// ---------- AI ----------
+function aiNutrition_(description) {
+  var key = PropertiesService.getScriptProperties().getProperty('OPENAI_API_KEY');
+  if (!key) throw new Error('Missing OPENAI_API_KEY in Script properties');
+
+  var url = 'https://api.openai.com/v1/chat/completions';
+  var payload = {
+    model: 'gpt-4o-mini',
+    response_format: { type: 'json_object' },
+    messages: [
+      { role: 'system', content: 'Return strict JSON with fields: calories, protein_g, carbs_g, fat_g. Units: kcal and grams.' },
+      { role: 'user', content: 'Food: ' + String(description || '').slice(0, 500) }
+    ],
+    temperature: 0
+  };
+
+  var res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    muteHttpExceptions: true,
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + key },
+    payload: JSON.stringify(payload)
+  });
+
+  if (res.getResponseCode() !== 200) throw new Error('OpenAI error ' + res.getResponseCode() + ': ' + res.getContentText());
+  var data = JSON.parse(res.getContentText());
+  var txt = data.choices[0].message.content;
+  var obj = JSON.parse(txt);
+
+  return { calories: num_(obj.calories), protein: num_(obj.protein_g), carbs: num_(obj.carbs_g), fat: num_(obj.fat_g) };
+}
+
+// ---------- Sheet utils ----------
+function ss_(){ return SpreadsheetApp.getActiveSpreadsheet(); }
+function json_(o){ return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
+function num_(v){ if (v===null || v===undefined || v==='') return 0; var m=String(v).match(/-?\d+(\.\d+)?/); return m? parseFloat(m[0]) : 0; }
+
+function getOrCreateSheet_(name, headers){
+  var ss = ss_(); var sh = ss.getSheetByName(name);
+  if(!sh){ sh = ss.insertSheet(name); }
+  var first = sh.getRange(1,1,1,sh.getMaxColumns()).getValues()[0].filter(String);
+  if(headers && first.length===0){ sh.getRange(1,1,1,headers.length).setValues([headers]); }
+  return sh;
+}
+function ensureHeaders_(name, headers){
+  var sh = getOrCreateSheet_(name, headers);
+  var existing = sh.getRange(1,1,1,sh.getMaxColumns()).getValues()[0].filter(String);
+  if(headers && existing.length < headers.length){
+    sh.getRange(1, existing.length+1, 1, headers.length-existing.length).setValues([headers.slice(existing.length)]);
+  }
+  return sh;
+}
+function readRows_(name){
+  var headersMap = {
+    'Food Log':     ['id','date','time','item','calories','protein','carbs','fat','notes'],
+    'Activity Log': ['id','date','type','durationMin','intensity','deviceCalories','avgHR','rpe','notes'],
+    'Meal Plans':   ['id','name','servings','calories','protein','carbs','fat','items'],
+    'Food Library': ['id','key','name','brand','serving_desc','calories','protein','carbs','fat','source','last_used','uses']
+  };
+  var headers = headersMap[name] || null;
+  var sh = ensureHeaders_(name, headers);
+  var lastRow = sh.getLastRow();
+  if(lastRow < 2) return [];
+  var lastCol = sh.getLastColumn();
+  var data = sh.getRange(1,1,lastRow,lastCol).getValues();
+  var head = data[0];
+  var rows = [];
+  for(var i=1;i<data.length;i++){
+    var row = data[i];
+    if(row.filter(String).length===0) continue;
+    var obj = {};
+    for(var j=0;j<head.length;j++){ obj[head[j]] = row[j]; }
+    rows.push(obj);
+  }
+  return rows;
+}
+function upsertRow_(name, row){
+  if (!row || !row.id) throw new Error('upsert requires row.id');
+  var rows = readRows_(name);
+  var headers = Object.keys(rows[0] || row);
+  var sh = ensureHeaders_(name, headers);
+  var head = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+  if (head.indexOf('id') < 0) { head.push('id'); sh.getRange(1,1,1,head.length).setValues([head]); }
+  var idCol = head.indexOf('id') + 1;
+  var lastRow = sh.getLastRow();
+  var idMap = {};
+  if (lastRow >= 2) {
+    var ids = sh.getRange(2, idCol, lastRow-1, 1).getValues().flat();
+    for (var i=0;i<ids.length;i++) idMap[String(ids[i])] = i+2;
+  }
+  var rowArr = new Array(head.length).fill('');
+  for (var k in row){ var idx = head.indexOf(k); if (idx>=0) rowArr[idx] = row[k]; }
+  var target = idMap[String(row.id)];
+  if (target) sh.getRange(target,1,1,head.length).setValues([rowArr]); else sh.appendRow(rowArr);
+}
+function deleteById_(name, id){
+  var sh = getOrCreateSheet_(name);
+  var head = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+  var idIdx = head.indexOf('id'); if (idIdx < 0) return;
+  var lastRow = sh.getLastRow(); if (lastRow < 2) return;
+  var ids = sh.getRange(2, idIdx+1, lastRow-1, 1).getValues();
+  for (var i=0;i<ids.length;i++){ if (String(ids[i][0]) === String(id)) { sh.deleteRow(i+2); return; } }
+}
+function readSettings_(){
+  var sh = ensureHeaders_('Settings', ['key','value']);
+  var last = sh.getLastRow(); var kv = {}; if (last < 2) return kv;
+  var data = sh.getRange(2,1,last-1,2).getValues();
+  for (var i=0;i<data.length;i++) kv[String(data[i][0])] = data[i][1];
+  return kv;
+}
+function setSettings_(kv){
+  var sh = ensureHeaders_('Settings', ['key','value']);
+  var existing = readSettings_();
+  for (var k in kv) existing[k] = kv[k];
+  var rows = []; for (var key in existing) rows.push([key, existing[key]]);
+  if (sh.getLastRow() > 1) sh.getRange(2,1,sh.getLastRow()-1,2).clearContent();
+  if (rows.length) sh.getRange(2,1,rows.length,2).setValues(rows);
+}
+
+// ---------- Food Library helpers ----------
+function norm_(s){ return String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim(); }
+function todayStr_(){ return new Date().toISOString().slice(0,10); }
+function ensureFoodLib_(){
+  return ensureHeaders_('Food Library',
+    ['id','key','name','brand','serving_desc','calories','protein','carbs','fat','source','last_used','uses']
+  );
+}
+function foodKey_(name, brand, serving){
+  return norm_(name) + '|' + norm_(brand) + '|' + norm_(serving);
+}
+function normalizeFoodRow_(r){
+  return {
+    id: r.id || r.key || '',
+    key: r.key || (r.id || ''),
+    name: r.name || '',
+    brand: r.brand || '',
+    serving_desc: r.serving_desc || r.serving || '',
+    calories: num_(r.calories || r.kcal),
+    protein:  num_(r.protein  || r.protein_g || r.protien),
+    carbs:    num_(r.carbs    || r.carb_g),
+    fat:      num_(r.fat      || r.fat_g),
+    source: r.source || '',
+    last_used: r.last_used || '',
+    uses: num_(r.uses)
+  };
+}
+function foodLibFind_(q, limit){
+  ensureFoodLib_();
+  var rows = readRows_('Food Library');
+  var qq = norm_(q);
+  var scored = [];
+  for (var i=0;i<rows.length;i++){
+    var r = rows[i];
+    var hay = norm_((r.name||'') + ' ' + (r.brand||'') + ' ' + (r.serving_desc||''));
+    var s = 0; if (!qq) continue;
+    if (hay.startsWith(qq)) s += 100;
+    if (hay.indexOf(qq) >= 0) s += 20;
+    s += Math.min(50, num_(r.uses));
+    if (r.last_used) s += 5;
+    if (s > 0) scored.push({s:s, row:r});
+  }
+  scored.sort(function(a,b){ return b.s - a.s; });
+  var out = [];
+  for (var j=0; j<Math.min(limit || 8, scored.length); j++) out.push(normalizeFoodRow_(scored[j].row));
+  return out;
+}
+function foodLibUpsert_(row){
+  ensureFoodLib_();
+  var name = row.name || row.item || '';
+  var brand = row.brand || '';
+  var serving = row.serving_desc || row.serving || '';
+  var key = foodKey_(name, brand, serving);
+
+  var lib = readRows_('Food Library');
+  var byKey = {}; for (var i=0;i<lib.length;i++){ byKey[String(lib[i].key)] = lib[i]; }
+  var existing = byKey[key];
+  var uses = existing ? num_(existing.uses) + 1 : 1;
+
+  var newRow = {
+    id: key,
+    key: key,
+    name: name,
+    brand: brand,
+    serving_desc: serving,
+    calories: num_(row.calories || row.kcal),
+    protein:  num_(row.protein),
+    carbs:    num_(row.carbs),
+    fat:      num_(row.fat),
+    source: row.source || (existing ? existing.source : 'food_log'),
+    last_used: todayStr_(),
+    uses: uses
+  };
+  upsertRow_('Food Library', newRow);
+  return normalizeFoodRow_(newRow);
+}
