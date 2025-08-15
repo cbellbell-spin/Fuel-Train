@@ -85,6 +85,67 @@ async function api(action, payload={}){
   if(!res.ok) throw new Error('Sheets API error '+res.status);
   return res.json();
 }
+// ==== Food Library client helpers ====
+
+// simple normalizer for matching
+function norm(s){
+  return String(s||'')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
+// call backend to find items in Food Library
+async function findFoodLibrary(q, limit=8){
+  const res = await api('foodlib.find', { q, limit });
+  // backend returns { ok:true, results:[...] }
+  if (!res || res.ok === false) return [];
+  return res.results || res.rows || [];
+}
+
+// render suggestions list under the Item field
+function renderFoodSuggestions(list){
+  const box = document.getElementById('f-suggest');
+  if (!box) return;
+  if (!list || !list.length){
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = `
+    <div class="panel" style="padding:8px">
+      <div class="small muted">Matches in your Food Library</div>
+      ${list.map(r=>`
+        <div class="row" style="justify-content:space-between;border-top:1px solid #1f2a40;padding:6px 0">
+          <div>
+            <div><b>${r.name || ''}</b> ${r.brand ? '· '+r.brand : ''}</div>
+            <div class="muted small">${r.serving_desc || ''}</div>
+          </div>
+          <button class="btn small" data-pick="${r.id}">
+            ${Math.round(r.calories||0)} kcal · ${Math.round(r.protein||0)}P ${Math.round(r.carbs||0)}C ${Math.round(r.fat||0)}F
+          </button>
+        </div>
+      `).join('')}
+    </div>
+  `;
+  // click to fill the form
+  box.querySelectorAll('[data-pick]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const id = btn.getAttribute('data-pick');
+      const r = list.find(x => String(x.id) === String(id));
+      if (!r) return;
+      // write values into the form
+      document.getElementById('f-item').value  = r.name || '';
+      document.getElementById('f-cal').value   = r.calories || 0;
+      document.getElementById('f-prot').value  = r.protein  || 0;
+      document.getElementById('f-carb').value  = r.carbs    || 0;
+      document.getElementById('f-fat').value   = r.fat      || 0;
+      const notesEl = document.getElementById('f-notes');
+      if (notesEl && r.serving_desc && !notesEl.value) notesEl.value = r.serving_desc;
+      renderFoodSuggestions([]); // clear after select
+    };
+  });
+}
 
 const defaultState = {
   foods: [], exercises: [], meals: [],
@@ -322,16 +383,61 @@ function renderFood(){
       $('#f-cal').value=r.calories||''; $('#f-prot').value=r.protein||''; $('#f-carb').value=r.carbs||''; $('#f-fat').value=r.fat||'';
     }catch(e){ toast(e.message); }
   };
-  $('#f-add').onclick = ()=>{
-    const row={ id:uid(), date:$('#f-date').value||todayStr(), time:$('#f-time').value||'00:00',
-      item:$('#f-item').value.trim()||'Food', calories:toNum($('#f-cal').value,0), protein:toNum($('#f-prot').value,0),
-      carbs:toNum($('#f-carb').value,0), fat:toNum($('#f-fat').value,0), notes:$('#f-notes').value.trim() };
-    state.foods.push(row); saveState(); if(SHEETS_ENDPOINT) pushRow('Food Log', row); renderFood();
+$('#f-add').onclick = async ()=>{
+  const row = {
+    id: uid(),
+    date: $('#f-date').value || todayStr(),
+    time: $('#f-time').value || '00:00',
+    item: $('#f-item').value.trim() || 'Food',
+    calories: toNum($('#f-cal').value,0),
+    protein: toNum($('#f-prot').value,0),
+    carbs: toNum($('#f-carb').value,0),
+    fat: toNum($('#f-fat').value,0),
+    notes: $('#f-notes').value.trim()
   };
+
+  state.foods.push(row); 
+  saveState();
+  if (SHEETS_ENDPOINT) {
+    // save to Food Log as before
+    pushRow('Food Log', row);
+    // new: grow your Food Library
+    api('foodlib.upsert', {
+      row: {
+        name: row.item,
+        serving_desc: row.notes || '',
+        calories: row.calories,
+        protein: row.protein,
+        carbs: row.carbs,
+        fat: row.fat,
+        source: 'food_log'
+      }
+    }).catch(()=>{ /* ignore errors here */ });
+  }
+  renderFood();
+};
+
   $('#f-clear').onclick = ()=>{ $('#f-filter').value=''; renderFoodTable(); };
   $('#f-sync').onclick = trySync;
   $('#f-filter').onchange = renderFoodTable;
   renderFoodTable();
+  // === typeahead on Item field to query Food Library ===
+const fItem = document.getElementById('f-item');
+let suggestTimer = 0;
+fItem.addEventListener('input', ()=>{
+  clearTimeout(suggestTimer);
+  const q = fItem.value.trim();
+  if (q.length < 2) { renderFoodSuggestions([]); return; }
+  suggestTimer = setTimeout(async ()=>{
+    try {
+      const hits = await findFoodLibrary(q, 8);
+      renderFoodSuggestions(hits);
+    } catch {
+      renderFoodSuggestions([]);
+    }
+  }, 180);
+});
+
 }
 function renderFoodTable(){
   const container=$('#f-table'); const filter=$('#f-filter').value;
