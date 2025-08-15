@@ -96,27 +96,56 @@ function dateKey(v){
 }
 
 function timeKey(v){
-  // Sheets times often come as Date around 1899-12-30
+  // Date object (including 1899-12-30 time-only dates)
   if (v instanceof Date) {
-    const hh = String(v.getHours()).padStart(2,'0');
-    const mm = String(v.getMinutes()).padStart(2,'0');
-    return `${hh}:${mm}`;
+    const h = String(v.getHours()).padStart(2,'0');
+    const m = String(v.getMinutes()).padStart(2,'0');
+    return `${h}:${m}`;
   }
+
   const s = String(v || '').trim();
-  // Accept HH:MM, H:MM am/pm, HHMM
-  const ampm = s.match(/^(\d{1,2}):?(\d{2})\s*(am|pm)$/i);
-  if (ampm){
-    let h = parseInt(ampm[1],10);
-    const m = ampm[2];
-    const ap = ampm[3].toLowerCase();
-    if (ap === 'pm' && h < 12) h += 12;
-    if (ap === 'am' && h === 12) h = 0;
-    return `${String(h).padStart(2,'0')}:${m}`;
+  if (!s) return '00:00';
+
+  // 1) 12-hour clock: "9:15 pm"
+  let m = s.match(/^(\d{1,2}):?(\d{2})\s*(am|pm)$/i);
+  if (m){
+    let h = parseInt(m[1],10);
+    const mm = m[2];
+    const ap = m[3].toLowerCase();
+    if (ap==='pm' && h<12) h+=12;
+    if (ap==='am' && h===12) h=0;
+    return `${String(h).padStart(2,'0')}:${mm}`;
   }
-  const hhmm = s.match(/^(\d{2}):?(\d{2})$/);
-  if (hhmm) return `${hhmm[1]}:${hhmm[2]}`;
+
+  // 2) 24h "HH:MM" or "HHMM"
+  m = s.match(/^(\d{1,2}):?(\d{2})$/);
+  if (m){
+    const h = String(parseInt(m[1],10)).padStart(2,'0');
+    const mm = String(parseInt(m[2],10)).padStart(2,'0');
+    return `${h}:${mm}`;
+  }
+
+  // 3) 3–4 digit compact "HMM" / "HHMM" like 915 or 0915
+  m = s.match(/^(\d{3,4})$/);
+  if (m){
+    const num = m[1].padStart(4,'0');
+    const h = num.slice(0,2);
+    const mm = num.slice(2,4);
+    return `${h}:${mm}`;
+  }
+
+  // 4) ISO-ish or 1899-anchor strings -> parse and use local time
+  const d = new Date(s);
+  if (!isNaN(d)) {
+    const h = String(d.getHours()).padStart(2,'0');
+    const mm = String(d.getMinutes()).padStart(2,'0');
+    return `${h}:${mm}`;
+  }
+
+  // Fallback
   return '00:00';
 }
+
 
 // For display (keeps your edit UX clean)
 const showDate = v => dateKey(v);
