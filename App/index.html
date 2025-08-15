@@ -80,6 +80,47 @@ const todayStr = ()=>{
 };
 
 const toNum = (v,d=0)=> isNaN(parseFloat(v))? d : parseFloat(v);
+function dateKey(v){
+  if (v instanceof Date) {
+    const d = new Date(v.getTime() - v.getTimezoneOffset()*60000);
+    return d.toISOString().slice(0,10);
+  }
+  const s = String(v||'').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d2 = new Date(s);
+  if (!isNaN(d2)) {
+    d2.setMinutes(d2.getMinutes() - d2.getTimezoneOffset());
+    return d2.toISOString().slice(0,10);
+  }
+  return todayStr();
+}
+
+function timeKey(v){
+  // Sheets times often come as Date around 1899-12-30
+  if (v instanceof Date) {
+    const hh = String(v.getHours()).padStart(2,'0');
+    const mm = String(v.getMinutes()).padStart(2,'0');
+    return `${hh}:${mm}`;
+  }
+  const s = String(v || '').trim();
+  // Accept HH:MM, H:MM am/pm, HHMM
+  const ampm = s.match(/^(\d{1,2}):?(\d{2})\s*(am|pm)$/i);
+  if (ampm){
+    let h = parseInt(ampm[1],10);
+    const m = ampm[2];
+    const ap = ampm[3].toLowerCase();
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h === 12) h = 0;
+    return `${String(h).padStart(2,'0')}:${m}`;
+  }
+  const hhmm = s.match(/^(\d{2}):?(\d{2})$/);
+  if (hhmm) return `${hhmm[1]}:${hhmm[2]}`;
+  return '00:00';
+}
+
+// For display (keeps your edit UX clean)
+const showDate = v => dateKey(v);
+const showTime = v => timeKey(v);
 const fmt1 = n=> (isFinite(n)? Math.round(n): 0);
 function dateKey(v){
   if (v instanceof Date) {
@@ -257,16 +298,18 @@ async function trySync(opts={ refresh:true }) {
     const res = await api('bootstrap', { version: APP_VERSION });
     const payload = (res && res.result) ? res.result : res;
 
-    if (Array.isArray(payload.foods)) {
+  if (Array.isArray(payload.foods)) {
   state.foods = payload.foods.map(r => ({
     ...r,
-    date: dateKey(r.date)
+    date: dateKey(r.date),
+    time: timeKey(r.time)
   }));
 }
 if (Array.isArray(payload.exercises)) {
   state.exercises = payload.exercises.map(r => ({
     ...r,
-    date: dateKey(r.date)
+    date: dateKey(r.date),
+    time: timeKey(r.time)
   }));
 }
 if (Array.isArray(payload.meals)) {
@@ -623,7 +666,12 @@ function renderFoodTable(){
       <tbody>
         ${rows.map(r=>`
           <tr>
-            ${['date','time','item','calories','protein','carbs','fat','notes'].map(k=>`<td contenteditable class="inline-edit" data-id="${r.id}" data-field="${k}">${r[k] ?? ''}</td>`).join('')}
+              ${['date','time','item','calories','protein','carbs','fat','notes'].map(k=>{
+              let val = r[k] ?? '';
+              if (k === 'date') val = showDate(val);
+              if (k === 'time') val = showTime(val);
+             return `<td contenteditable class="inline-edit" data-id="${r.id}" data-field="${k}">${val}</td>`;
+             }).join('')}
             <td><button class="btn danger small" data-del="${r.id}">Del</button></td>
           </tr>`).join('')}
       </tbody>
@@ -634,7 +682,11 @@ function renderFoodTable(){
     cell.addEventListener('blur', ()=>{
       const id=cell.dataset.id, field=cell.dataset.field;
       const row=state.foods.find(x=> x.id===id); if(!row) return;
-      row[field]=['calories','protein','carbs','fat'].includes(field)? toNum(cell.textContent.trim(),0): cell.textContent.trim();
+      const raw = cell.textContent.trim();
+      if (field === 'date') row.date = dateKey(raw);
+      else if (field === 'time') row.time = timeKey(raw);
+      else if (['calories','protein','carbs','fat'].includes(field)) row[field] = toNum(raw,0);
+      else row[field] = raw;
       saveState(); if(SHEETS_ENDPOINT) pushRow('Food Log', row); renderFoodTable();
     });
   });
@@ -705,7 +757,12 @@ function renderExerciseTable(){
       <tbody>
         ${rows.map(r=>`
           <tr>
-            ${['date','type','durationMin','intensity','deviceCalories','avgHR','rpe','notes'].map(k=>`<td contenteditable class="inline-edit" data-exid="${r.id}" data-field="${k}">${r[k] ?? ''}</td>`).join('')}
+        ${['date','type','durationMin','intensity','deviceCalories','avgHR','rpe','notes'].map(k=>{
+         let val = r[k] ?? '';
+         if (k === 'date') val = showDate(val);
+         if (k === 'time') val = showTime(val);
+         return `<td contenteditable class="inline-edit" data-exid="${r.id}" data-field="${k}">${val}</td>`;
+        }).join('')}
             <td>${fmt1(correctedActiveCalories(r))}</td>
             <td><button class="btn danger small" data-del="${r.id}">Del</button></td>
           </tr>`).join('')}
@@ -718,7 +775,11 @@ function renderExerciseTable(){
       const id=cell.dataset.exid, field=cell.dataset.field;
       const row=state.exercises.find(x=> x.id===id); if(!row) return;
       const numeric=['durationMin','deviceCalories','avgHR','rpe'].includes(field);
-      row[field]=numeric? toNum(cell.textContent.trim(),0): cell.textContent.trim();
+      const raw = cell.textContent.trim();
+       if (field === 'date') row.date = dateKey(raw);
+       else if (field === 'time') row.time = timeKey(raw);
+       else if (['durationMin','deviceCalories','avgHR','rpe'].includes(field)) row[field] = toNum(raw,0);
+       else row[field] = raw;
       saveState(); if(SHEETS_ENDPOINT) pushRow('Activity Log', row); renderExerciseTable();
     });
   });
