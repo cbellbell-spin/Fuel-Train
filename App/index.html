@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Fuel & Train — Tracker (Sheets + AI)</title>
+<title>Fuel & Train - Tracker (Sheets + AI)</title>
 <link rel="icon" href="assets/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
@@ -66,53 +66,19 @@
 </main>
 
 <script>
-/* ============================================================
-   App state
-============================================================ */
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.3.1';
 let SHEETS_ENDPOINT = '';
 let OPENAI_KEY = '';
 let OPENAI_MODEL = 'gpt-4o-mini';
 
-const $  = (s, r=document)=> r.querySelector(s);
+const $ = (s, r=document)=> r.querySelector(s);
 const $$ = (s, r=document)=> Array.from(r.querySelectorAll(s));
 const todayStr = ()=> new Date().toISOString().slice(0,10);
-const daysAgoStr = (n)=> { const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().slice(0,10); };
 const toNum = (v,d=0)=> isNaN(parseFloat(v))? d : parseFloat(v);
 const fmt1 = n=> (isFinite(n)? Math.round(n): 0);
 const uid = ()=> Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
-function toast(m){ alert(m); }
+function toast(m){ try{ alert(m); }catch{} }
 
-const defaultState = {
-  foods: [], exercises: [], meals: [],
-  settings: {
-    bodyWeightKg: 81.6, proteinPerKg: 2.0, ree: 1950, actCalFactor: 0.70,
-    highDayCarb_g_per_kg: 6.0, modDayCarb_g_per_kg: 4.0, lowDayCarb_g_per_kg: 2.5, fat_g_per_kg: 0.8,
-    goal: 'recomp', deficit: 400, glp1: false, dayType: 'moderate',
-    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local',
-    sheetsEndpoint: '', openaiKey: '', openaiModel: 'gpt-4o-mini', dietaryStrategy: 'hexis'
-  },
-  lastSync: null
-};
-function loadState(){
-  try{
-    const raw=localStorage.getItem('ft-app-state-v2');
-    if(!raw) return JSON.parse(JSON.stringify(defaultState));
-    const s=JSON.parse(raw);
-    s.settings = Object.assign({}, defaultState.settings, s.settings||{});
-    s.foods = s.foods||[]; s.exercises = s.exercises||[]; s.meals = s.meals||[];
-    return s;
-  }catch{ return JSON.parse(JSON.stringify(defaultState)); }
-}
-let state = loadState();
-SHEETS_ENDPOINT = state.settings.sheetsEndpoint || '';
-OPENAI_KEY      = state.settings.openaiKey || '';
-OPENAI_MODEL    = state.settings.openaiModel || 'gpt-4o-mini';
-function saveState(){ localStorage.setItem('ft-app-state-v2', JSON.stringify(state)); }
-
-/* ============================================================
-   API helpers (Apps Script backend)
-============================================================ */
 async function api(action, payload={}){
   if(!SHEETS_ENDPOINT) throw new Error('No Sheets endpoint configured');
   const res = await fetch(SHEETS_ENDPOINT, {
@@ -124,158 +90,7 @@ async function api(action, payload={}){
   return res.json();
 }
 
-/* ======= AI nutrition lookup goes through GET to avoid preflight ======= */
-async function lookupMacrosWithAI(description){
-  if (!SHEETS_ENDPOINT) throw new Error('No backend set. Add your Apps Script Web App URL in Settings.');
-  const url = SHEETS_ENDPOINT + '?action=ai.nutrition&description=' + encodeURIComponent(description || '');
-  const res = await fetch(url, { method: 'GET' });
-  if (!res.ok) throw new Error(`Backend error ${res.status}`);
-  const data = await res.json();
-  if (!data.ok) throw new Error(data.error || 'AI lookup failed');
-  return data.result; // { calories, protein, carbs, fat }
-}
-
-/* ============================================================
-   Load-on-refresh banner + range pull
-============================================================ */
-let SHOW_LOAD_PROMPT = true; // show a choice banner every refresh
-
-function renderLoadBanner(){
-  if(!SHEETS_ENDPOINT || !SHOW_LOAD_PROMPT) return '';
-  return `
-    <div class="panel" id="load-banner">
-      <div class="row" style="justify-content:space-between;align-items:center">
-        <div><b>Load from Google Sheets?</b> Choose a range to pull Food + Activity.</div>
-        <div class="row">
-          <button class="btn secondary" id="load-today">Today</button>
-          <button class="btn secondary" id="load-3d">Last 3 days</button>
-          <button class="btn secondary" id="load-7d">Last 7 days</button>
-          <button class="btn warn" id="load-skip">Skip</button>
-        </div>
-      </div>
-      <div class="small muted">Meal Plans always load in full.</div>
-    </div>
-  `;
-}
-
-function normalizeFoodRow(r){
-  return {
-    id:String(r.id||uid()),
-    date:String(r.date||todayStr()),
-    time:String(r.time||'00:00'),
-    item:r.item||'',
-    calories:toNum(r.calories,0),
-    protein:toNum(r.protein,0),
-    carbs:toNum(r.carbs,0),
-    fat:toNum(r.fat,0),
-    notes:r.notes||''
-  };
-}
-function normalizeExRow(r){
-  return {
-    id:String(r.id||uid()),
-    date:String(r.date||todayStr()),
-    type:r.type||'Other',
-    durationMin:toNum(r.durationMin,0),
-    intensity:r.intensity||'moderate',
-    deviceCalories:toNum(r.deviceCalories,0),
-    avgHR:toNum(r.avgHR,0),
-    rpe:toNum(r.rpe,0),
-    notes:r.notes||''
-  };
-}
-function normalizeMealRow(r){
-  return {
-    id:String(r.id||uid()),
-    name:r.name||'Meal',
-    servings:toNum(r.servings,1),
-    calories:toNum(r.calories,0),
-    protein:toNum(r.protein,0),
-    carbs:toNum(r.carbs,0),
-    fat:toNum(r.fat,0),
-    items:r.items||''
-  };
-}
-
-async function pullRange(days=0){
-  if(!SHEETS_ENDPOINT){ toast('Add your Sheets URL in Settings'); return; }
-  const from = daysAgoStr(days);
-  const to   = todayStr();
-  const between = (d)=> d && d >= from && d <= to;
-
-  try{
-    const foodsRes = await api('list', {sheet:'Food Log'});
-    const exRes    = await api('list', {sheet:'Activity Log'});
-    const mealsRes = await api('list', {sheet:'Meal Plans'});
-
-    const foods = (foodsRes.rows||[]).filter(r=> between(String(r.date||''))).map(normalizeFoodRow);
-    const exs   = (exRes.rows||[]).filter(r=> between(String(r.date||''))).map(normalizeExRow);
-    const meals = (mealsRes.rows||[]).map(normalizeMealRow);
-
-    state.foods = foods;
-    state.exercises = exs;
-    state.meals = meals;
-    state.lastSync = new Date().toISOString();
-    saveState();
-
-    SHOW_LOAD_PROMPT = false;
-    toast(`Loaded ${days===0?'today':`last ${days} day${days>1?'s':''}`} from Sheets`);
-    renderDashboard();
-  }catch(e){
-    toast('Load failed: '+e.message);
-  }
-}
-
-/* ============================================================
-   Tabs + views
-============================================================ */
-const tabs = [
-  {id:'dashboard', label:'Dashboard'},
-  {id:'food',      label:'Log Food'},
-  {id:'ex',        label:'Log Exercise'},
-  {id:'data',      label:'Data & Export'},
-  {id:'meals',     label:'Meal Plans'},
-  {id:'settings',  label:'Settings'},
-  {id:'suggest',   label:'Suggestions'}
-];
-function renderTabs(active='dashboard'){
-  const nav = $('#tabs'); nav.innerHTML='';
-  tabs.forEach(t=>{
-    const b=document.createElement('button');
-    b.textContent=t.label;
-    b.className = t.id===active? 'active':'';
-    b.onclick=()=>switchView(t.id);
-    nav.appendChild(b);
-  });
-}
-function switchView(id){
-  $$('.view').forEach(v=> v.style.display='none');
-  $(`#view-${id}`).style.display='';
-  renderTabs(id);
-  if(id==='dashboard') renderDashboard();
-  if(id==='food')      renderFood();
-  if(id==='ex')        renderExercise();
-  if(id==='data')      renderData();
-  if(id==='settings')  renderSettings();
-  if(id==='suggest')   renderSuggest();
-  if(id==='meals')     renderMeals();
-}
-
-/* ============================================================
-   Sync helpers
-============================================================ */
-async function pushRow(sheet, row){
-  if(!SHEETS_ENDPOINT) return;
-  try{ await api('upsert',{sheet,row}); }catch(e){ console.warn('pushRow failed', e); }
-}
-async function deleteRow(sheet, id){
-  if(!SHEETS_ENDPOINT) return;
-  try{ await api('delete',{sheet,id}); }catch(e){ console.warn('deleteRow failed', e); }
-}
-
-/* ============================================================
-   Food Library client bits (search + suggestions)
-============================================================ */
+// ==== Food Library client helpers ====
 function norm(s){
   return String(s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
 }
@@ -314,16 +129,152 @@ function renderFoodSuggestions(list){
       $('#f-prot').value  = r.protein  || 0;
       $('#f-carb').value  = r.carbs    || 0;
       $('#f-fat').value   = r.fat      || 0;
-      const notesEl = $('#f-notes'); if (notesEl && r.serving_desc && !notesEl.value) notesEl.value = r.serving_desc;
-      const srcEl = document.getElementById('f-source'); if (srcEl) srcEl.textContent = 'Filled from Food Library';
-      renderFoodSuggestions([]); // clear
+      const notesEl = $('#f-notes');
+      if (notesEl && r.serving_desc && !notesEl.value) notesEl.value = r.serving_desc;
+      renderFoodSuggestions([]);
     };
   });
 }
 
-/* ============================================================
-   Calcs
-============================================================ */
+const defaultState = {
+  foods: [], exercises: [], meals: [],
+  settings: {
+    bodyWeightKg: 81.6, proteinPerKg: 2.0, ree: 1950, actCalFactor: 0.70,
+    highDayCarb_g_per_kg: 6.0, modDayCarb_g_per_kg: 4.0, lowDayCarb_g_per_kg: 2.5, fat_g_per_kg: 0.8,
+    goal: 'recomp', deficit: 400, glp1: false, dayType: 'moderate',
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'local',
+    sheetsEndpoint: '', openaiKey: '', openaiModel: 'gpt-4o-mini', dietaryStrategy: 'hexis'
+  },
+  lastSync: null
+};
+function loadState(){
+  try{
+    const raw=localStorage.getItem('ft-app-state-v2');
+    if(!raw) return JSON.parse(JSON.stringify(defaultState));
+    const s=JSON.parse(raw);
+    s.settings=Object.assign({},defaultState.settings,s.settings||{});
+    s.foods=s.foods||[]; s.exercises=s.exercises||[]; s.meals=s.meals||[];
+    return s;
+  }catch{ return JSON.parse(JSON.stringify(defaultState)); }
+}
+let state = loadState();
+SHEETS_ENDPOINT = state.settings.sheetsEndpoint || '';
+OPENAI_KEY = state.settings.openaiKey || '';
+OPENAI_MODEL = state.settings.openaiModel || 'gpt-4o-mini';
+function saveState(){ localStorage.setItem('ft-app-state-v2', JSON.stringify(state)); }
+
+const tabs = [
+  {id:'dashboard', label:'Dashboard'},{id:'food', label:'Log Food'},{id:'ex', label:'Log Exercise'},
+  {id:'data', label:'Data & Export'},{id:'meals', label:'Meal Plans'},{id:'settings', label:'Settings'},{id:'suggest', label:'Suggestions'}
+];
+function renderTabs(active='dashboard'){
+  const nav = $('#tabs'); nav.innerHTML='';
+  tabs.forEach(t=>{
+    const b=document.createElement('button');
+    b.textContent=t.label;
+    b.className = t.id===active? 'active':'';
+    b.onclick=()=>switchView(t.id);
+    nav.appendChild(b);
+  });
+}
+function switchView(id){
+  $$('.view').forEach(v=> v.style.display='none');
+  $(`#view-${id}`).style.display='';
+  renderTabs(id);
+  if(id==='dashboard') renderDashboard();
+  if(id==='food') renderFood();
+  if(id==='ex') renderExercise();
+  if(id==='data') renderData();
+  if(id==='settings') renderSettings();
+  if(id==='suggest') renderSuggest();
+  if(id==='meals') renderMeals();
+}
+
+/* ---------- rerender helpers (used after sync) ---------- */
+function currentViewId() {
+  const v = Array.from(document.querySelectorAll('main .view'))
+    .find(s => s.style.display !== 'none');
+  return v ? v.id.replace('view-','') : 'dashboard';
+}
+function rerender() {
+  const id = currentViewId();
+  if(id==='dashboard') renderDashboard();
+  if(id==='food')      renderFood();
+  if(id==='ex')        renderExercise();
+  if(id==='data')      renderData();
+  if(id==='settings')  renderSettings();
+  if(id==='suggest')   renderSuggest();
+  if(id==='meals')     renderMeals();
+}
+
+/* ---------- loading banner helpers (shown during initial sync) ---------- */
+function showLoadingBanner(msg){
+  const headerWrap = document.querySelector('header .wrap');
+  if (!headerWrap) return;
+  let el = document.getElementById('ft-loading');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'ft-loading';
+    el.className = 'panel';
+    el.style.marginTop = '10px';
+    el.innerHTML = `<div class="small">${msg || 'Loading...'}</div>`;
+    headerWrap.appendChild(el);
+  } else {
+    el.querySelector('.small').textContent = msg || 'Loading...';
+  }
+}
+function hideLoadingBanner(){
+  const el = document.getElementById('ft-loading');
+  if (el && el.parentNode) el.parentNode.removeChild(el);
+}
+
+/* ---------- sync pipeline ---------- */
+async function trySync(opts={ refresh:true }) {
+  if (!SHEETS_ENDPOINT) {
+    return { foods: state.foods.length, exercises: state.exercises.length, meals: state.meals.length };
+  }
+  try {
+    const res = await api('bootstrap', { version: APP_VERSION });
+    const payload = (res && res.result) ? res.result : res;
+
+    if (Array.isArray(payload.foods))     state.foods = payload.foods;
+    if (Array.isArray(payload.exercises)) state.exercises = payload.exercises;
+    if (Array.isArray(payload.meals))     state.meals = payload.meals;
+
+    state.lastSync = new Date().toISOString();
+    saveState();
+
+    if (opts.refresh) rerender();
+
+    const info = {
+      foods: state.foods.length,
+      exercises: state.exercises.length,
+      meals: state.meals.length
+    };
+    try { toast(`Pulled ${info.foods} foods, ${info.exercises} activities, ${info.meals} meals`); } catch {}
+    return info;
+  } catch (e) {
+    console.warn('sync failed', e);
+    toast('Sync failed: ' + e.message);
+    return { foods: state.foods.length, exercises: state.exercises.length, meals: state.meals.length };
+  }
+}
+
+async function pushRow(sheet, row){ if(!SHEETS_ENDPOINT) return; try{ await api('upsert',{sheet,row}); }catch(e){ console.warn('pushRow failed', e); } }
+async function deleteRow(sheet, id){ if(!SHEETS_ENDPOINT) return; try{ await api('delete',{sheet,id}); }catch(e){ console.warn('deleteRow failed', e); } }
+
+/* ---------- AI lookup goes through backend GET to avoid CORS preflight ---------- */
+async function lookupMacrosWithAI(description){
+  if (!SHEETS_ENDPOINT) throw new Error('No backend set. Add your Apps Script Web App URL in Settings.');
+  const url = SHEETS_ENDPOINT + '?action=ai.nutrition&description=' + encodeURIComponent(description || '');
+  const res = await fetch(url, { method: 'GET' });
+  if (!res.ok) throw new Error(`Backend error ${res.status}`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error || 'AI lookup failed');
+  return data.result; // { calories, protein, carbs, fat }
+}
+
+/* ---------- calculations ---------- */
 function correctedActiveCalories(e){
   const factor = toNum(state.settings.actCalFactor,0.7);
   const device = toNum(e.deviceCalories,0);
@@ -349,6 +300,7 @@ function macroPlan(){
   if(s.dayType==='high'){ ckg=s.highDayCarb_g_per_kg; }
   else if(s.dayType==='low'){ ckg=s.lowDayCarb_g_per_kg; }
   else if(s.dayType==='rest'){ ckg=Math.min(2.0,s.lowDayCarb_g_per_kg); }
+
   const strat = s.dietaryStrategy || 'none';
   if (strat === 'hexis') {
     const exToday = state.exercises.filter(e => e.date === todayStr());
@@ -358,7 +310,9 @@ function macroPlan(){
       if(e.intensity==='high'){ w = 2.0; }
       else if(e.intensity==='moderate'){ w = 1.5; }
       else if(e.intensity==='low'){ w = 1.0; }
-      acc.load += h * w; acc.h += h; return acc;
+      acc.load += h * w;
+      acc.h += h;
+      return acc;
     }, {load:0, h:0});
     const load = hoursByInt.load;
     const mapped = 2.0 + Math.min(6.0, load * 2.0);
@@ -384,6 +338,7 @@ function macroPlan(){
     if(ckg > 5.0){ ckg = 5.0; }
     if(toNum(s.fat_g_per_kg,0.8) < 1.0){ s.fat_g_per_kg = 1.0; }
   }
+
   const carbs = bw*ckg;
   const fatsMin=bw*toNum(s.fat_g_per_kg,0.8);
   const kcP=protein*4, kcC=carbs*4;
@@ -397,18 +352,14 @@ function macroPlan(){
   return {protein, carbs, fats, kcalsTarget: target, tdee, actToday};
 }
 
-/* ============================================================
-   Dashboard
-============================================================ */
+/* ---------- views ---------- */
 function renderDashboard(){
   const el=$('#view-dashboard'); const d=todayStr(); const totals=calcTotals(d);
   const tdee = toNum(state.settings.ree,1950)+totals.active;
   const goal=state.settings.goal; const def=toNum(state.settings.deficit,400);
   let target=tdee; if(goal==='loss'){ target=tdee-def; } else if(goal==='recomp'){ target=tdee-Math.min(def,300); } else if(goal==='gain'){ target=tdee+200; }
   const balance = target - totals.calFood;
-
   el.innerHTML = `
-    ${renderLoadBanner()}
     <div class="panel">
       <div class="row">
         <div class="stat"><b>${fmt1(totals.calFood)}</b><div class="small muted">Calories eaten</div></div>
@@ -442,16 +393,6 @@ function renderDashboard(){
       </div>
     </div>
   `;
-
-  // Load banner events (if shown)
-  const bn = $('#load-banner');
-  if (bn){
-    $('#load-today').onclick = ()=>{ pullRange(0); };
-    $('#load-3d').onclick    = ()=>{ pullRange(3); };
-    $('#load-7d').onclick    = ()=>{ pullRange(7); };
-    $('#load-skip').onclick  = ()=>{ SHOW_LOAD_PROMPT=false; $('#load-banner')?.remove(); };
-  }
-
   $('#qa-ai').onclick = async ()=>{
     try{
       const desc=$('#qa-food').value.trim(); if(!desc){ toast('Enter a food description'); return; }
@@ -466,9 +407,6 @@ function renderDashboard(){
   };
 }
 
-/* ============================================================
-   Food view
-============================================================ */
 function renderFood(){
   const el=$('#view-food');
   el.innerHTML = `
@@ -484,28 +422,25 @@ function renderFood(){
           <div><label>Protein (g)</label><input id="f-prot" type="number" step="0.1"></div>
           <div><label>Carbs (g)</label><input id="f-carb" type="number" step="0.1"></div>
           <div><label>Fat (g)</label><input id="f-fat" type="number" step="0.1"></div>
-          <div class="small muted" id="f-source" style="grid-column: span 3;"></div>
         </div>
         <div style="grid-column: span 4"><label>Notes</label><textarea id="f-notes"></textarea></div>
-      </div>
 
-      <div class="panel" style="margin-top:12px">
-        <div class="row">
-          <div style="flex:1">
-            <label>From Meal Plan</label>
-            <select id="f-mealpick">
-              <option value="">Pick a saved meal…</option>
-            </select>
+        <div class="panel" style="margin-top:12px; grid-column: span 4">
+          <div class="row">
+            <div style="flex:1">
+              <label>From Meal Plan</label>
+              <select id="f-mealpick">
+                <option value="">Pick a saved meal…</option>
+              </select>
+            </div>
+            <button class="btn secondary" id="f-meal-apply">Apply to form</button>
+            <button class="btn secondary" id="f-meal-add">Add as entry</button>
           </div>
-          <button class="btn secondary" id="f-meal-apply">Apply to form</button>
-          <button class="btn secondary" id="f-meal-add">Add as entry</button>
+          <div class="small muted">Apply fills the fields. Add inserts a Food Log row for this meal.</div>
         </div>
-        <div class="small muted">Apply fills the fields. Add inserts a Food Log row for this meal.</div>
       </div>
-
       <div class="row">
         <button class="btn secondary" id="f-ai">Lookup macros with AI</button>
-        <button class="btn secondary" id="f-save-meal">Save as Meal Plan</button>
         <button class="btn" id="f-add">Add</button>
       </div>
     </div>
@@ -522,17 +457,18 @@ function renderFood(){
     </div>
   `;
 
-  // Populate Meal Plan picker
+  // meal plan picker options
   const mealSel = $('#f-mealpick');
-  const meals = (state.meals || []).slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
-  meals.forEach(m=>{
-    const opt = document.createElement('option');
-    opt.value = m.id;
-    opt.textContent = `${m.name || 'Meal'} • ${fmt1(m.calories||0)} kcal · ${fmt1(m.protein||0)}P ${fmt1(m.carbs||0)}C ${fmt1(m.fat||0)}F`;
-    mealSel.appendChild(opt);
-  });
+  if (mealSel) {
+    const meals = (state.meals || []).slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
+    meals.forEach(m=>{
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = `${m.name || 'Meal'} • ${fmt1(m.calories||0)} kcal · ${fmt1(m.protein||0)}P ${fmt1(m.carbs||0)}C ${fmt1(m.fat||0)}F`;
+      mealSel.appendChild(opt);
+    });
+  }
   function getMealById(id){ return (state.meals || []).find(m=> String(m.id) === String(id)); }
-
   $('#f-meal-apply').onclick = ()=>{
     const chosen = getMealById($('#f-mealpick').value);
     if (!chosen) { toast('Pick a meal'); return; }
@@ -543,7 +479,6 @@ function renderFood(){
     $('#f-fat').value  = toNum(chosen.fat,0);
     const notesEl = $('#f-notes');
     if (notesEl && chosen.items && !notesEl.value) notesEl.value = chosen.items;
-    $('#f-source').textContent = 'Filled from Meal Plan';
   };
   $('#f-meal-add').onclick = async ()=>{
     const chosen = getMealById($('#f-mealpick').value);
@@ -564,7 +499,8 @@ function renderFood(){
       pushRow('Food Log', row);
       api('foodlib.upsert', {
         row: {
-          name: row.item, serving_desc: row.notes || '',
+          name: row.item,
+          serving_desc: row.notes || '',
           calories: row.calories, protein: row.protein, carbs: row.carbs, fat: row.fat,
           source: 'meal_plan'
         }
@@ -578,26 +514,13 @@ function renderFood(){
       const desc=$('#f-item').value.trim(); if(!desc){ toast('Enter a food description'); return; }
       const r=await lookupMacrosWithAI(desc);
       $('#f-cal').value=r.calories||''; $('#f-prot').value=r.protein||''; $('#f-carb').value=r.carbs||''; $('#f-fat').value=r.fat||'';
-      $('#f-source').textContent = 'Filled by AI estimate';
+      // seed library too
+      if (SHEETS_ENDPOINT) {
+        api('foodlib.upsert', {
+          row: { name: desc, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, source:'ai' }
+        }).catch(()=>{});
+      }
     }catch(e){ toast(e.message); }
-  };
-
-  $('#f-save-meal').onclick = ()=>{
-    const meal={ id:uid(), name:$('#f-item').value.trim()||'Meal', servings:1,
-      calories:toNum($('#f-cal').value,0), protein:toNum($('#f-prot').value,0),
-      carbs:toNum($('#f-carb').value,0), fat:toNum($('#f-fat').value,0),
-      items:$('#f-notes').value.trim()
-    };
-    state.meals.push(meal); saveState();
-    if(SHEETS_ENDPOINT){
-      pushRow('Meal Plans', meal);
-      api('foodlib.upsert', { row:{
-        name: meal.name, serving_desc: meal.items||'',
-        calories: meal.calories, protein: meal.protein, carbs: meal.carbs, fat: meal.fat,
-        source: 'meal_plan'
-      }}).catch(()=>{});
-    }
-    toast('Saved to Meal Plans'); renderMeals();
   };
 
   $('#f-add').onclick = async ()=>{
@@ -615,8 +538,9 @@ function renderFood(){
     state.foods.push(row); saveState();
     if (SHEETS_ENDPOINT) {
       pushRow('Food Log', row);
-      api('foodlib.upsert', { row:{
-        name: row.item, serving_desc: row.notes||'',
+      api('foodlib.upsert', { row: {
+        name: row.item,
+        serving_desc: row.notes || '',
         calories: row.calories, protein: row.protein, carbs: row.carbs, fat: row.fat,
         source: 'food_log'
       }}).catch(()=>{});
@@ -625,11 +549,14 @@ function renderFood(){
   };
 
   $('#f-clear').onclick = ()=>{ $('#f-filter').value=''; renderFoodTable(); };
-  $('#f-sync').onclick  = ()=> pullRange(7);
+  $('#f-sync').onclick = async ()=>{
+    const ff = $('#f-filter'); if (ff) ff.value = ''; // clear filter so you see results
+    await trySync({ refresh:true });
+  };
   $('#f-filter').onchange = renderFoodTable;
   renderFoodTable();
 
-  // typeahead to Food Library
+  // typeahead
   const fItem = document.getElementById('f-item');
   let suggestTimer = 0;
   fItem.addEventListener('input', ()=>{
@@ -637,11 +564,16 @@ function renderFood(){
     const q = fItem.value.trim();
     if (q.length < 2) { renderFoodSuggestions([]); return; }
     suggestTimer = setTimeout(async ()=>{
-      try { renderFoodSuggestions(await findFoodLibrary(q, 8)); }
-      catch { renderFoodSuggestions([]); }
+      try {
+        const hits = await findFoodLibrary(q, 8);
+        renderFoodSuggestions(hits);
+      } catch {
+        renderFoodSuggestions([]);
+      }
     }, 180);
   });
 }
+
 function renderFoodTable(){
   const container=$('#f-table'); const filter=$('#f-filter').value;
   const rows=state.foods.filter(r=> !filter || r.date===filter);
@@ -684,9 +616,6 @@ function renderFoodTable(){
   });
 }
 
-/* ============================================================
-   Exercise view
-============================================================ */
 function renderExercise(){
   const el=$('#view-ex');
   el.innerHTML = `
@@ -729,7 +658,7 @@ function renderExercise(){
     state.exercises.push(e); saveState(); if(SHEETS_ENDPOINT) pushRow('Activity Log', e); renderExercise();
   };
   $('#e-clear').onclick = ()=>{ $('#e-filter').value=''; renderExerciseTable(); };
-  $('#e-sync').onclick  = ()=> pullRange(7);
+  $('#e-sync').onclick = async ()=>{ await trySync({ refresh:true }); };
   $('#e-filter').onchange = renderExerciseTable;
   renderExerciseTable();
 }
@@ -771,9 +700,6 @@ function renderExerciseTable(){
   });
 }
 
-/* ============================================================
-   Meals
-============================================================ */
 function renderMeals(){
   const el=$('#view-meals');
   el.innerHTML = `
@@ -839,9 +765,6 @@ function renderMealList(){
   });
 }
 
-/* ============================================================
-   Data import/export
-============================================================ */
 function toCSV(rows, headers){
   const h=headers||Object.keys(rows[0]||{});
   const esc=v=>{ if(v==null) return ''; const s=String(v); return /[",\n]/.test(s)? '"'+s.replace(/"/g,'""')+'"' : s; };
@@ -879,8 +802,8 @@ function renderData(){
   `;
   function download(name,text){ const a=document.createElement('a'); a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(text); a.download=name; a.style.display='none'; document.body.appendChild(a); a.click(); a.remove(); }
   $('#exp-food').onclick = ()=> download(`foods_${todayStr()}.csv`, foodsCSV);
-  $('#exp-ex').onclick   = ()=> download(`exercises_${todayStr()}.csv`, exCSV);
-  $('#exp-meals').onclick= ()=> download(`meals_${todayStr()}.csv`, mealsCSV);
+  $('#exp-ex').onclick = ()=> download(`exercises_${todayStr()}.csv`, exCSV);
+  $('#exp-meals').onclick = ()=> download(`meals_${todayStr()}.csv`, mealsCSV);
   $('#exp-json').onclick = ()=> download(`ft_backup_${Date.now()}.json`, JSON.stringify(state,null,2));
 
   $('#imp-run').onclick = ()=>{
@@ -889,14 +812,30 @@ function renderData(){
     reader.onload=()=>{
       const text=reader.result; const target=$('#imp-target').value;
       try{
-        if(file.name.endsWith('.json') || target==='state'){ const obj=JSON.parse(text); state=Object.assign({},state,obj); saveState(); toast('Imported JSON'); location.reload(); return; }
+        if(file.name.endsWith('.json') || target==='state'){
+          const obj=JSON.parse(text); state=Object.assign({},state,obj); saveState(); toast('Imported JSON'); location.reload(); return;
+        }
         const lines=text.split(/\r?\n/).filter(Boolean); const headers=lines.shift().split(',');
-        const parseRow=line=>{ const cells=[]; let cur='',q=false; for(let i=0;i<line.length;i++){ const ch=line[i]; if(q){ if(ch==='"' && line[i+1]==='"'){cur+='"';i++;} else if(ch==='"'){q=false;} else {cur+=ch;} } else { if(ch===','){cells.push(cur);cur='';} else if(ch==='"'){q=true;} else {cur+=ch;} } } cells.push(cur); const obj={}; headers.forEach((h,idx)=> obj[h]=cells[idx]??''); return obj; };
+        const parseRow=line=>{
+          const cells=[]; let cur='',q=false;
+          for(let i=0;i<line.length;i++){
+            const ch=line[i];
+            if(q){
+              if(ch==='\"' && line[i+1]==='\"'){cur+='\"';i++;}
+              else if(ch==='\"'){q=false;} else {cur+=ch;}
+            } else {
+              if(ch===','){cells.push(cur);cur='';}
+              else if(ch==='\"'){q=true;} else {cur+=ch;}
+            }
+          }
+          cells.push(cur);
+          const obj={}; headers.forEach((h,idx)=> obj[h]=cells[idx]??''); return obj;
+        };
         const rows = lines.map(parseRow);
         if(target==='foods' || (target==='auto' && headers.includes('item') && headers.includes('calories'))){
           state.foods = rows.map(r=>({id:r.id||uid(),date:r.date||todayStr(),time:r.time||'00:00',item:r.item||'',calories:toNum(r.calories,0),protein:toNum(r.protein,0),carbs:toNum(r.carbs,0),fat:toNum(r.fat,0),notes:r.notes||''}));
         } else if(target==='exercises' || (target==='auto' && headers.includes('durationMin') && headers.includes('intensity'))){
-          state.exercises = rows.map(r=>({id:r.id||uid(),date:r.date||todayStr(),type:r.type||'Other',durationMin:toNum(r.durationMin,0),intensity:r.intensity||'moderate',deviceCalories:toNum(r.deviceCalories,0),avgHR:toNum(r.avgHR,0),rpe:toNum(r.rpe,0),notes:r.notes||''}));
+          state.exercises = rows.map(r=>({id:r.id||uid(),date:r.date||todayStr(),type:r.type||'Other',durationMin:toNum(r.durationMin,0),intensity:toNum(r.intensity,0)||r.intensity||'moderate',deviceCalories:toNum(r.deviceCalories,0),avgHR:toNum(r.avgHR,0),rpe:toNum(r.rpe,0),notes:r.notes||''}));
         } else if(target==='meals' || (target==='auto' && headers.includes('servings') && headers.includes('calories') && headers.includes('name'))){
           state.meals = rows.map(r=>({id:r.id||uid(),name:r.name||'Meal',servings:toNum(r.servings,1),calories:toNum(r.calories,0),protein:toNum(r.protein,0),carbs:toNum(r.carbs,0),fat:toNum(r.fat,0),items:r.items||''}));
         } else { toast('CSV not recognized'); return; }
@@ -907,9 +846,6 @@ function renderData(){
   };
 }
 
-/* ============================================================
-   Settings
-============================================================ */
 function renderSettings(){
   const s=state.settings; const el=$('#view-settings');
   el.innerHTML = `
@@ -967,30 +903,34 @@ function renderSettings(){
         <div><label>OpenAI API Key</label><input id="s-openai" placeholder="sk-..." value="${s.openaiKey||''}"></div>
         <div><label>OpenAI Model</label><input id="s-model" value="${s.openaiModel||OPENAI_MODEL}"></div>
       </div>
-      <div class="row right"><button class="btn" id="s-save">Save settings</button><button class="btn secondary" id="s-sync">Pull last 7 days</button></div>
+      <div class="row right"><button class="btn" id="s-save">Save settings</button><button class="btn secondary" id="s-sync">Pull from Sheets</button></div>
       <div class="small muted">Paste your Apps Script Web App URL to sync. Paste your OpenAI key to enable AI macro lookup.</div>
     </div>
   `;
   $('#s-save').onclick = ()=>{
-    s.bodyWeightKg=toNum($('#s-bw').value,s.bodyWeightKg); s.proteinPerKg=toNum($('#s-ppk').value,s.proteinPerKg); s.ree=toNum($('#s-ree').value,s.ree);
-    s.actCalFactor=toNum($('#s-fact').value,s.actCalFactor); s.dayType=$('#s-day').value; s.goal=$('#s-goal').value; s.deficit=toNum($('#s-def').value,s.deficit);
-    s.glp1=$('#s-glp1').value==='true'; s.dietaryStrategy=$('#s-strategy')? $('#s-strategy').value : (s.dietaryStrategy||'none');
-    s.sheetsEndpoint=$('#s-sheet').value.trim(); s.openaiKey=$('#s-openai').value.trim(); s.openaiModel=$('#s-model').value.trim()||'gpt-4o-mini';
-    SHEETS_ENDPOINT=s.sheetsEndpoint; OPENAI_KEY=s.openaiKey; OPENAI_MODEL=s.openaiModel; saveState(); toast('Saved');
+    s.bodyWeightKg=toNum($('#s-bw').value,s.bodyWeightKg);
+    s.proteinPerKg=toNum($('#s-ppk').value,s.proteinPerKg);
+    s.ree=toNum($('#s-ree').value,s.ree);
+    s.actCalFactor=toNum($('#s-fact').value,s.actCalFactor);
+    s.dayType=$('#s-day').value; s.goal=$('#s-goal').value;
+    s.deficit=toNum($('#s-def').value,s.deficit);
+    s.glp1=$('#s-glp1').value==='true';
+    s.dietaryStrategy=$('#s-strategy')? $('#s-strategy').value : (s.dietaryStrategy||'none');
+    s.sheetsEndpoint=$('#s-sheet').value.trim(); s.openaiKey=$('#s-openai').value.trim();
+    s.openaiModel=$('#s-model').value.trim()||'gpt-4o-mini';
+    SHEETS_ENDPOINT=s.sheetsEndpoint; OPENAI_KEY=s.openaiKey; OPENAI_MODEL=s.openaiModel;
+    saveState(); toast('Saved');
   };
-  $('#s-sync').onclick = ()=> pullRange(7);
+  $('#s-sync').onclick = async ()=>{ await trySync({ refresh:true }); };
 }
 
-/* ============================================================
-   Suggestions
-============================================================ */
 function renderSuggest(){
   const el=$('#view-suggest'); const mp=macroPlan();
   const strat = (state.settings && state.settings.dietaryStrategy) || 'none';
   let stratNote = '';
   if(strat==='hexis'){ stratNote='Hexis preset active: carbs scale with today’s training load.'; }
   else if(strat==='paleo'){ stratNote='Paleo preset active: carbs moderated, fats slightly higher.'; }
-  else if(strat==='keto'){ stratNote='Keto preset active: ~30 g carbs/day; fats fill remaining calories.'; }
+  else if(strat==='keto'){ stratNote='Keto preset active: ~30 g carbs per day; fats fill remaining calories.'; }
   else if(strat==='mediterranean'){ stratNote='Mediterranean preset active: balanced carbs and fats.'; }
 
   let hexLine = '';
@@ -1006,11 +946,12 @@ function renderSuggest(){
   const eaten=state.foods.filter(f=> f.date===todayStr()).reduce((a,f)=>{a.kcal+=toNum(f.calories,0);a.p+=toNum(f.protein,0);a.c+=toNum(f.carbs,0);a.f+=toNum(f.fat,0);return a;},{kcal:0,p:0,c:0,f:0});
   const left = {kcal: mp.kcalsTarget - eaten.kcal, p: mp.protein - eaten.p, c: mp.carbs - eaten.c, f: mp.fats - eaten.f};
   const dt=state.settings.dayType;
-  let timing=[]; if(dt==='high'){ timing=["Pre 2–3h: 1–1.5 g/kg carbs + lean protein, low fat","During: 60–90 g carbs/h if >90 min, sodium 500–800 mg/h","Post 0–2h: 0.6–1.0 g/kg carbs + 30–50 g protein"]; }
-  else if(dt==='moderate'){ timing=["Pre 1–2h: ~0.8 g/kg carbs + 25–35 g protein","During: 30–60 g carbs/h if >60 min","Post: 0.4–0.8 g/kg carbs + 30–40 g protein"]; }
+  let timing=[];
+  if(dt==='high'){ timing=["Pre 2 to 3 h: 1 to 1.5 g/kg carbs + lean protein, low fat","During: 60 to 90 g carbs/h if over 90 min, sodium 500 to 800 mg/h","Post 0 to 2 h: 0.6 to 1.0 g/kg carbs + 30 to 50 g protein"]; }
+  else if(dt==='moderate'){ timing=["Pre 1 to 2 h: ~0.8 g/kg carbs + 25 to 35 g protein","During: 30 to 60 g carbs/h if over 60 min","Post: 0.4 to 0.8 g/kg carbs + 30 to 40 g protein"]; }
   else { timing=["Protein-forward meals","Place most carbs around training","Hydrate and salt as needed"]; }
 
-  const glp1Tips = state.settings.glp1? ["Smaller, more frequent meals","Front-load protein earlier in day","Hydrate on waking before first food","Keep ultra-fatty foods moderate if nausea-prone"] : [];
+  const glp1Tips = state.settings.glp1? ["Smaller, more frequent meals","Front load protein earlier in day","Hydrate on waking before first food","Keep ultra fatty foods moderate if nausea prone"] : [];
 
   el.innerHTML = `
     <div class="panel">
@@ -1028,19 +969,36 @@ function renderSuggest(){
         <li><b>Strategy:</b> ${stratNote}</li>
         ${hexLine}
         <li><b>Fueling timing:</b> ${timing.join(' • ')}</li>
-        <li><b>Protein floor:</b> close ${fmt1(mp.protein)} g by dinner. Add a 30–40 g protein snack if behind.</li>
+        <li><b>Protein floor:</b> close ${fmt1(mp.protein)} g by dinner. Add a 30 to 40 g protein snack if behind.</li>
         ${state.settings.glp1 ? `<li><b>GLP-1 adjustments:</b> ${glp1Tips.join(' • ')}</li>` : ''}
-        <li><b>Electrolytes:</b> 500–800 mg sodium per hour in heat or heavy sweat.</li>
+        <li><b>Electrolytes:</b> 500 to 800 mg sodium per hour in heat or heavy sweat.</li>
       </ul>
     </div>
   `;
 }
 
-/* ============================================================
-   Boot
-============================================================ */
+/* ---------- boot: render, then first load sync and rerender ---------- */
 renderTabs();
-switchView('dashboard'); // we do NOT auto-sync; banner asks what to load
+switchView('dashboard');
+
+(async function firstLoadSync(){
+  const key = 'ft-initial-sync:' + (SHEETS_ENDPOINT || 'none');
+  const already = localStorage.getItem(key);
+
+  if (!SHEETS_ENDPOINT) return;
+  if (already === '1') return;
+
+  try {
+    showLoadingBanner('Pulling today\'s data from Sheets...');
+    await trySync({ refresh:false });
+    localStorage.setItem(key, '1');
+    rerender();
+  } catch (e) {
+    console.warn('Initial sync failed', e);
+  } finally {
+    hideLoadingBanner();
+  }
+})();
 </script>
 </body>
 </html>
