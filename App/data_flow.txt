@@ -1,0 +1,100 @@
+# Fuel & Train - request flow map
+
+## Components
+
+* Frontend - GitHub Pages at `https://cbellbell-spin.github.io/Fuel-Train/App/`
+* Proxy - Cloudflare Worker at `https://fuel-train-proxy.<your-subdomain>.workers.dev`
+* Backend - Google Apps Script Web App at `https://script.google.com/macros/s/<EXEC_ID>/exec`
+* Sheet - Your Google Sheet that stores logs
+
+## Data flow
+
+1. User clicks AI lookup or saves a row
+2. Frontend calls `SHEETS_ENDPOINT`
+
+   * For AI: `GET  <Worker>?action=ai.nutrition&description=<text>`
+   * For sheets: `POST <Worker>` with JSON `{action, payload}`
+3. Worker forwards the request to Apps Script
+
+   * `TARGET` inside the Worker points to your `/exec` URL
+   * Worker adds CORS headers so the browser is happy
+4. Apps Script handles it
+
+   * `doGet` with `action=ai.nutrition` calls OpenAI with your server-side key and returns JSON macros
+   * `doPost` handles `bootstrap`, `upsert`, `delete`, `list`, `settings.*` and reads/writes the Sheet
+5. Worker relays the response back to the browser
+
+## Where to change things
+
+* Change frontend endpoint - Settings screen in your app
+
+  * Google Sheets Web App URL = your Worker URL
+* Change Worker target - Cloudflare Worker code
+
+  * `const TARGET = 'https://script.google.com/macros/s/<EXEC_ID>/exec'`
+* Change OpenAI key - Apps Script
+
+  * Project Settings - Script properties - `OPENAI_API_KEY`
+
+## Quick tests - lowest friction first
+
+* Backend alive:
+
+  * Open in a tab:
+    `https://script.google.com/macros/s/<EXEC_ID>/exec?action=ai.nutrition&description=banana`
+  * Expect JSON with numbers - not a timestamp
+* Proxy pass-through:
+
+  * Open in a tab:
+    `https://fuel-train-proxy.<your-subdomain>.workers.dev?action=ai.nutrition&description=banana`
+* Frontend wiring:
+
+  * In browser console on your app page:
+
+    ```js
+    fetch(SHEETS_ENDPOINT + '?action=ai.nutrition&description=banana').then(r=>r.json()).then(console.log)
+    ```
+
+## Common break points - and fixes
+
+* You see Google login page
+
+  * Apps Script is not public. Deployment must be Execute as Me - Access Anyone
+* CORS error from the browser
+
+  * You called Apps Script directly from GitHub Pages. Use the Worker URL in Settings
+* 404 from Worker
+
+  * `TARGET` is wrong or includes `/dev`. It must be the `/exec` URL
+* Only health check JSON returns
+
+  * Missing `?action=ai.nutrition` on GET
+  * Hitting old deployment. Redeploy Apps Script, then update `TARGET`
+* 405 Method Not Allowed
+
+  * You sent a preflight-triggering POST directly to Apps Script. Route through Worker or use GET for AI
+
+## Logging and debugging
+
+* Apps Script - Executions panel shows errors and Logger output
+* Worker - Quick Edit - Preview - Console for runtime errors
+* Browser - Network tab is your truth. Check Request URL, Status, and Response
+
+## Version bumps - what to remember
+
+* If you redeploy Apps Script and the `/exec` URL changes
+
+  * Update the Worker `TARGET` and redeploy the Worker
+  * No frontend changes needed if it still points at the Worker
+* If you move the site to a custom domain
+
+  * Update CORS in the Worker if you later add origin checks
+
+## Security - next steps after this simple setup
+
+* Add a private bearer token check in the Worker
+* Lock origin in the Worker to your site
+* Optional daily cap in Apps Script
+* Optional: move AI calls from Apps Script to the Worker using a secret there, and keep Apps Script only for Sheets
+
+No external sources used here - this is implementation guidance based on the code you and I set up. If you want, I can add the bearer token gate now with a two-line change and a tiny Settings field in the frontend.
