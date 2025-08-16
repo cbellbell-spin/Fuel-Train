@@ -209,6 +209,11 @@ function renderFoodSuggestions(list){
       `).join('')}
     </div>
   `;
+  document.getElementById('btnSync').onclick = async () => {
+  const info = await trySync({ refresh:true });
+  console.log('Sync finished:', info);
+};
+
   box.querySelectorAll('[data-pick]').forEach(btn=>{
     btn.onclick = ()=>{
       const id = btn.getAttribute('data-pick');
@@ -228,6 +233,8 @@ function renderFoodSuggestions(list){
 
 const defaultState = {
   foods: [], exercises: [], meals: [],
+  // NEW:
+  daily: [],  // holds rows from "Daily Summary" (date, activeKcalsOverride, ...)
   settings: {
     bodyWeightKg: 81.6, proteinPerKg: 2.0, ree: 1950, actCalFactor: 0.70,
     highDayCarb_g_per_kg: 6.0, modDayCarb_g_per_kg: 4.0, lowDayCarb_g_per_kg: 2.5, fat_g_per_kg: 0.8,
@@ -321,29 +328,44 @@ function hideLoadingBanner(){
 /* ---------- sync pipeline ---------- */
 async function trySync(opts={ refresh:true }) {
   if (!SHEETS_ENDPOINT) {
-    return { foods: state.foods.length, exercises: state.exercises.length, meals: state.meals.length };
+    return { foods: state.foods.length, exercises: state.exercises.length, meals: state.meals.length, daily: (state.daily||[]).length };
   }
   try {
     const res = await api('bootstrap', { version: APP_VERSION });
     const payload = (res && res.result) ? res.result : res;
 
-  if (Array.isArray(payload.foods)) {
-  state.foods = payload.foods.map(r => ({
-    ...r,
-    date: dateKey(r.date),
-    time: timeKey(r.time)
-  }));
-}
-if (Array.isArray(payload.exercises)) {
-  state.exercises = payload.exercises.map(r => ({
-    ...r,
-    date: dateKey(r.date),
-    time: timeKey(r.time)
-  }));
-}
-if (Array.isArray(payload.meals)) {
-  state.meals = payload.meals.slice(); // no date column here
-}
+    // Foods
+    if (Array.isArray(payload.foods)) {
+      state.foods = payload.foods.map(r => ({
+        ...r,
+        date: dateKey(r.date),
+        time: timeKey(r.time)
+      }));
+    }
+
+    // Exercises
+    if (Array.isArray(payload.exercises)) {
+      state.exercises = payload.exercises.map(r => ({
+        ...r,
+        date: dateKey(r.date),
+        time: timeKey(r.time)
+      }));
+    }
+
+    // Meals (no date/time columns)
+    if (Array.isArray(payload.meals)) {
+      state.meals = payload.meals.slice();
+    }
+
+    // NEW: Daily Summary (date + optional activeKcalsOverride, etc.)
+    if (Array.isArray(payload.daily)) {
+      state.daily = payload.daily.map(r => ({
+        ...r,
+        date: dateKey(r.date) // ensure 'YYYY-MM-DD'
+      }));
+    } else if (!Array.isArray(state.daily)) {
+      state.daily = [];
+    }
 
     state.lastSync = new Date().toISOString();
     saveState();
@@ -353,16 +375,18 @@ if (Array.isArray(payload.meals)) {
     const info = {
       foods: state.foods.length,
       exercises: state.exercises.length,
-      meals: state.meals.length
+      meals: state.meals.length,
+      daily: state.daily.length
     };
-    try { toast(`Pulled ${info.foods} foods, ${info.exercises} activities, ${info.meals} meals`); } catch {}
+    try { toast(`Pulled ${info.foods} foods, ${info.exercises} activities, ${info.meals} meals, ${info.daily} daily rows`); } catch {}
     return info;
   } catch (e) {
     console.warn('sync failed', e);
     toast('Sync failed: ' + e.message);
-    return { foods: state.foods.length, exercises: state.exercises.length, meals: state.meals.length };
+    return { foods: state.foods.length, exercises: state.exercises.length, meals: state.meals.length, daily: (state.daily||[]).length };
   }
 }
+
 
 async function pushRow(sheet, row){ if(!SHEETS_ENDPOINT) return; try{ await api('upsert',{sheet,row}); }catch(e){ console.warn('pushRow failed', e); } }
 async function deleteRow(sheet, id){ if(!SHEETS_ENDPOINT) return; try{ await api('delete',{sheet,id}); }catch(e){ console.warn('deleteRow failed', e); } }
@@ -394,10 +418,41 @@ function calcTotals(dateStr){
   const p = foods.reduce((a,b)=> a+toNum(b.protein),0);
   const c = foods.reduce((a,b)=> a+toNum(b.carbs),0);
   const f = foods.reduce((a,b)=> a+toNum(b.fat),0);
-  const active = exs.reduce((a,b)=> a+correctedActiveCalories(b),0);
+  // NEW: prefer manual override if present
+  const override = getActiveOverride(dateStr);
+  const active = (override != null)
+    ? override
+    : exs.reduce((a,b)=> a+correctedActiveCalories(b),0);
   return {calFood,p,c,f,active};
 }
-function macroPlan(){
+function getActiveOverride(dateStr){
+  const d = String(dateStr || todayStr());
+  const row = (state.daily || []).find(r => String(r.date) === d);
+  const v = row ? toNum(row.activeKcalsOverride, NaN) : NaN;
+  return isNaN(v) ? null : v;
+}
+
+async function saveActiveOverride(dateStr, value){
+  const row = {
+    id: `ds_${dateStr}`,                 // stable id per date
+    date: dateStr,
+    activeKcalsOverride: toNum(value,0),
+    source: 'manual',
+    updatedAt: new Date().toISOString()
+  };
+  // update local state
+  const idx = (state.daily || []).findIndex(r => String(r.date) === dateStr);
+  if (idx >= 0) state.daily[idx] = Object.assign({}, state.daily[idx], row);
+  else (state.daily || (state.daily=[])).push(row);
+  saveState();
+
+  // persist if backend available
+  if (SHEETS_ENDPOINT) {
+    try { await api('upsert', { sheet:'Daily Summary', row }); }
+    catch (e) { console.warn('upsert Daily Summary failed', e); }
+  }
+}
+  function macroPlan(){
   const s=state.settings; const bw=toNum(s.bodyWeightKg,80);
   const protein = Math.max(bw*toNum(s.proteinPerKg,2.0), bw*1.6);
   let ckg=s.modDayCarb_g_per_kg;
@@ -732,6 +787,22 @@ function renderFoodTable(){
 function renderExercise(){
   const el=$('#view-ex');
   el.innerHTML = `
+    <div class="panel">
+  <h3 class="small">Daily Active Calories (Total)</h3>
+  <div class="grid g4">
+    <div><label>Date</label><input id="ds-date" type="date" value="${todayStr()}"></div>
+    <div>
+      <label>Total active kcals for day</label>
+      <input id="ds-active" type="number" placeholder="e.g. 850">
+      <div class="small muted">Includes exercise + other activity (watch/EPOCH). You can update throughout the day.</div>
+    </div>
+  </div>
+  <div class="row right">
+    <button class="btn" id="ds-save">Save override</button>
+    <button class="btn secondary" id="ds-clear">Clear override</button>
+  </div>
+</div>
+
     <div class="panel">
       <h3 class="small">Add Exercise</h3>
       <div class="grid g4">
