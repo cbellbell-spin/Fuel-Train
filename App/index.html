@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Fuel & Train - Tracker (Sheets + AI)</title>
+<title>Fuel & Train — Tracker (Sheets + AI)</title>
 <link rel="icon" href="assets/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
 <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16.png">
@@ -66,20 +66,20 @@
 </main>
 
 <script>
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.3.2';
 let SHEETS_ENDPOINT = '';
 let OPENAI_KEY = '';
 let OPENAI_MODEL = 'gpt-4o-mini';
 
-const $ = (s, r=document)=> r.querySelector(s);
+const $  = (s, r=document)=> r.querySelector(s);
 const $$ = (s, r=document)=> Array.from(r.querySelectorAll(s));
+
+/* ---------- date/time helpers ---------- */
 const todayStr = ()=>{
   const d = new Date();
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); // local YYYY-MM-DD
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
   return d.toISOString().slice(0,10);
 };
-
-const toNum = (v,d=0)=> isNaN(parseFloat(v))? d : parseFloat(v);
 function dateKey(v){
   if (v instanceof Date) {
     const d = new Date(v.getTime() - v.getTimezoneOffset()*60000);
@@ -94,19 +94,16 @@ function dateKey(v){
   }
   return todayStr();
 }
-
 function timeKey(v){
-  // Date object (including 1899-12-30 time-only dates)
   if (v instanceof Date) {
     const h = String(v.getHours()).padStart(2,'0');
     const m = String(v.getMinutes()).padStart(2,'0');
     return `${h}:${m}`;
   }
-
   const s = String(v || '').trim();
   if (!s) return '00:00';
 
-  // 1) 12-hour clock: "9:15 pm"
+  // "9:15 pm"
   let m = s.match(/^(\d{1,2}):?(\d{2})\s*(am|pm)$/i);
   if (m){
     let h = parseInt(m[1],10);
@@ -116,16 +113,14 @@ function timeKey(v){
     if (ap==='am' && h===12) h=0;
     return `${String(h).padStart(2,'0')}:${mm}`;
   }
-
-  // 2) 24h "HH:MM" or "HHMM"
+  // "HH:MM" or "HHMM"
   m = s.match(/^(\d{1,2}):?(\d{2})$/);
   if (m){
     const h = String(parseInt(m[1],10)).padStart(2,'0');
     const mm = String(parseInt(m[2],10)).padStart(2,'0');
     return `${h}:${mm}`;
   }
-
-  // 3) 3–4 digit compact "HMM" / "HHMM" like 915 or 0915
+  // "HMM"/"HHMM" compact
   m = s.match(/^(\d{3,4})$/);
   if (m){
     const num = m[1].padStart(4,'0');
@@ -133,42 +128,24 @@ function timeKey(v){
     const mm = num.slice(2,4);
     return `${h}:${mm}`;
   }
-
-  // 4) ISO-ish or 1899-anchor strings -> parse and use local time
+  // ISO-ish or time-only date objects from Sheets
   const d = new Date(s);
   if (!isNaN(d)) {
     const h = String(d.getHours()).padStart(2,'0');
     const mm = String(d.getMinutes()).padStart(2,'0');
     return `${h}:${mm}`;
   }
-
-  // Fallback
   return '00:00';
 }
-
-
-// For display (keeps your edit UX clean)
 const showDate = v => dateKey(v);
 const showTime = v => timeKey(v);
-const fmt1 = n=> (isFinite(n)? Math.round(n): 0);
-function dateKey(v){
-  if (v instanceof Date) {
-    const d = new Date(v.getTime() - v.getTimezoneOffset()*60000);
-    return d.toISOString().slice(0,10);
-  }
-  const s = String(v || '').trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const d2 = new Date(s);
-  if (!isNaN(d2)) {
-    d2.setMinutes(d2.getMinutes() - d2.getTimezoneOffset());
-    return d2.toISOString().slice(0,10);
-  }
-  return todayStr(); // fallback so rows aren’t “lost”
-}
 
-const uid = ()=> Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
+const toNum = (v,d=0)=> isNaN(parseFloat(v))? d : parseFloat(v);
+const fmt1  = n => (isFinite(n)? Math.round(n): 0);
+const uid   = ()=> Math.random().toString(36).slice(2,10)+Date.now().toString(36).slice(-4);
 function toast(m){ try{ alert(m); }catch{} }
 
+/* ---------- API ---------- */
 async function api(action, payload={}){
   if(!SHEETS_ENDPOINT) throw new Error('No Sheets endpoint configured');
   const res = await fetch(SHEETS_ENDPOINT, {
@@ -180,7 +157,7 @@ async function api(action, payload={}){
   return res.json();
 }
 
-// ==== Food Library client helpers ====
+/* ---------- Food Library helpers ---------- */
 function norm(s){
   return String(s||'').toLowerCase().replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
 }
@@ -209,11 +186,6 @@ function renderFoodSuggestions(list){
       `).join('')}
     </div>
   `;
-  document.getElementById('btnSync').onclick = async () => {
-  const info = await trySync({ refresh:true });
-  console.log('Sync finished:', info);
-};
-
   box.querySelectorAll('[data-pick]').forEach(btn=>{
     btn.onclick = ()=>{
       const id = btn.getAttribute('data-pick');
@@ -231,10 +203,11 @@ function renderFoodSuggestions(list){
   });
 }
 
+/* ---------- state ---------- */
 const defaultState = {
   foods: [], exercises: [], meals: [],
-  // NEW:
-  daily: [],  // holds rows from "Daily Summary" (date, activeKcalsOverride, ...)
+  // Map of overrides keyed by 'YYYY-MM-DD' -> { activeKcalsOverride, source, updatedAt }
+  dailyOverrides: {},
   settings: {
     bodyWeightKg: 81.6, proteinPerKg: 2.0, ree: 1950, actCalFactor: 0.70,
     highDayCarb_g_per_kg: 6.0, modDayCarb_g_per_kg: 4.0, lowDayCarb_g_per_kg: 2.5, fat_g_per_kg: 0.8,
@@ -251,6 +224,7 @@ function loadState(){
     const s=JSON.parse(raw);
     s.settings=Object.assign({},defaultState.settings,s.settings||{});
     s.foods=s.foods||[]; s.exercises=s.exercises||[]; s.meals=s.meals||[];
+    s.dailyOverrides = s.dailyOverrides || {};
     return s;
   }catch{ return JSON.parse(JSON.stringify(defaultState)); }
 }
@@ -260,9 +234,15 @@ OPENAI_KEY = state.settings.openaiKey || '';
 OPENAI_MODEL = state.settings.openaiModel || 'gpt-4o-mini';
 function saveState(){ localStorage.setItem('ft-app-state-v2', JSON.stringify(state)); }
 
+/* ---------- tabs ---------- */
 const tabs = [
-  {id:'dashboard', label:'Dashboard'},{id:'food', label:'Log Food'},{id:'ex', label:'Log Exercise'},
-  {id:'data', label:'Data & Export'},{id:'meals', label:'Meal Plans'},{id:'settings', label:'Settings'},{id:'suggest', label:'Suggestions'}
+  {id:'dashboard', label:'Dashboard'},
+  {id:'food',      label:'Log Food'},
+  {id:'ex',        label:'Log Exercise'},
+  {id:'data',      label:'Data & Export'},
+  {id:'meals',     label:'Meal Plans'},
+  {id:'settings',  label:'Settings'},
+  {id:'suggest',   label:'Suggestions'}
 ];
 function renderTabs(active='dashboard'){
   const nav = $('#tabs'); nav.innerHTML='';
@@ -279,15 +259,15 @@ function switchView(id){
   $(`#view-${id}`).style.display='';
   renderTabs(id);
   if(id==='dashboard') renderDashboard();
-  if(id==='food') renderFood();
-  if(id==='ex') renderExercise();
-  if(id==='data') renderData();
-  if(id==='settings') renderSettings();
-  if(id==='suggest') renderSuggest();
-  if(id==='meals') renderMeals();
+  if(id==='food')      renderFood();
+  if(id==='ex')        renderExercise();
+  if(id==='data')      renderData();
+  if(id==='settings')  renderSettings();
+  if(id==='suggest')   renderSuggest();
+  if(id==='meals')     renderMeals();
 }
 
-/* ---------- rerender helpers (used after sync) ---------- */
+/* ---------- rerender helpers ---------- */
 function currentViewId() {
   const v = Array.from(document.querySelectorAll('main .view'))
     .find(s => s.style.display !== 'none');
@@ -304,7 +284,7 @@ function rerender() {
   if(id==='meals')     renderMeals();
 }
 
-/* ---------- loading banner helpers (shown during initial sync) ---------- */
+/* ---------- loading banner ---------- */
 function showLoadingBanner(msg){
   const headerWrap = document.querySelector('header .wrap');
   if (!headerWrap) return;
@@ -328,7 +308,12 @@ function hideLoadingBanner(){
 /* ---------- sync pipeline ---------- */
 async function trySync(opts={ refresh:true }) {
   if (!SHEETS_ENDPOINT) {
-    return { foods: state.foods.length, exercises: state.exercises.length, meals: state.meals.length, daily: (state.daily||[]).length };
+    return {
+      foods: state.foods.length,
+      exercises: state.exercises.length,
+      meals: state.meals.length,
+      daily: Object.keys(state.dailyOverrides||{}).length
+    };
   }
   try {
     const res = await api('bootstrap', { version: APP_VERSION });
@@ -352,19 +337,26 @@ async function trySync(opts={ refresh:true }) {
       }));
     }
 
-    // Meals (no date/time columns)
+    // Meals (no date/time)
     if (Array.isArray(payload.meals)) {
       state.meals = payload.meals.slice();
     }
 
-    // NEW: Daily Summary (date + optional activeKcalsOverride, etc.)
+    // Daily Summary -> map to overrides
     if (Array.isArray(payload.daily)) {
-      state.daily = payload.daily.map(r => ({
-        ...r,
-        date: dateKey(r.date) // ensure 'YYYY-MM-DD'
-      }));
-    } else if (!Array.isArray(state.daily)) {
-      state.daily = [];
+      const map = {};
+      payload.daily.forEach(r=>{
+        const d = dateKey(r.date);
+        const v = toNum(r.activeKcalsOverride, NaN);
+        if (!isNaN(v)) {
+          map[d] = {
+            activeKcalsOverride: v,
+            source: r.source || 'server',
+            updatedAt: r.updatedAt || new Date().toISOString()
+          };
+        }
+      });
+      state.dailyOverrides = map;
     }
 
     state.lastSync = new Date().toISOString();
@@ -376,22 +368,26 @@ async function trySync(opts={ refresh:true }) {
       foods: state.foods.length,
       exercises: state.exercises.length,
       meals: state.meals.length,
-      daily: state.daily.length
+      daily: Object.keys(state.dailyOverrides||{}).length
     };
-    try { toast(`Pulled ${info.foods} foods, ${info.exercises} activities, ${info.meals} meals, ${info.daily} daily rows`); } catch {}
+    try { toast(`Pulled ${info.foods} foods, ${info.exercises} activities, ${info.meals} meals, ${info.daily} daily overrides`); } catch {}
     return info;
   } catch (e) {
     console.warn('sync failed', e);
     toast('Sync failed: ' + e.message);
-    return { foods: state.foods.length, exercises: state.exercises.length, meals: state.meals.length, daily: (state.daily||[]).length };
+    return {
+      foods: state.foods.length,
+      exercises: state.exercises.length,
+      meals: state.meals.length,
+      daily: Object.keys(state.dailyOverrides||{}).length
+    };
   }
 }
-
 
 async function pushRow(sheet, row){ if(!SHEETS_ENDPOINT) return; try{ await api('upsert',{sheet,row}); }catch(e){ console.warn('pushRow failed', e); } }
 async function deleteRow(sheet, id){ if(!SHEETS_ENDPOINT) return; try{ await api('delete',{sheet,id}); }catch(e){ console.warn('deleteRow failed', e); } }
 
-/* ---------- AI lookup goes through backend GET to avoid CORS preflight ---------- */
+/* ---------- AI lookup (GET to avoid preflight) ---------- */
 async function lookupMacrosWithAI(description){
   if (!SHEETS_ENDPOINT) throw new Error('No backend set. Add your Apps Script Web App URL in Settings.');
   const url = SHEETS_ENDPOINT + '?action=ai.nutrition&description=' + encodeURIComponent(description || '');
@@ -411,48 +407,58 @@ function correctedActiveCalories(e){
   const met = {rest:1.2, low:4.0, moderate:7.0, high:10.0}[e.intensity||'moderate'];
   return met * toNum(state.settings.bodyWeightKg,80) * durH;
 }
+
+// Prefer daily override when present
+function getActiveForDate(dateStr){
+  const o = state.dailyOverrides && state.dailyOverrides[dateStr];
+  if (o && Number.isFinite(+o.activeKcalsOverride)) return +o.activeKcalsOverride;
+  const exs = state.exercises.filter(e=> e.date===dateStr);
+  return exs.reduce((a,b)=> a+correctedActiveCalories(b),0);
+}
+
 function calcTotals(dateStr){
-  const foods = state.foods.filter(f=> dateKey(f.date) === dateStr);
-  const exs   = state.exercises.filter(e=> dateKey(e.date) === dateStr);
+  const foods = state.foods.filter(f=> f.date===dateStr);
   const calFood = foods.reduce((a,b)=> a+toNum(b.calories),0);
   const p = foods.reduce((a,b)=> a+toNum(b.protein),0);
   const c = foods.reduce((a,b)=> a+toNum(b.carbs),0);
   const f = foods.reduce((a,b)=> a+toNum(b.fat),0);
-  // NEW: prefer manual override if present
-  const override = getActiveOverride(dateStr);
-  const active = (override != null)
-    ? override
-    : exs.reduce((a,b)=> a+correctedActiveCalories(b),0);
+  const active = getActiveForDate(dateStr);
   return {calFood,p,c,f,active};
 }
-function getActiveOverride(dateStr){
-  const d = String(dateStr || todayStr());
-  const row = (state.daily || []).find(r => String(r.date) === d);
-  const v = row ? toNum(row.activeKcalsOverride, NaN) : NaN;
-  return isNaN(v) ? null : v;
-}
 
-async function saveActiveOverride(dateStr, value){
+/* ---------- daily override save/clear ---------- */
+async function setDailyOverride(dateStr, kcals, source='manual'){
+  if (!dateStr) dateStr = todayStr();
   const row = {
-    id: `ds_${dateStr}`,                 // stable id per date
+    id: `ds_${dateStr}`,
     date: dateStr,
-    activeKcalsOverride: toNum(value,0),
-    source: 'manual',
+    activeKcalsOverride: toNum(kcals, 0),
+    source,
     updatedAt: new Date().toISOString()
   };
-  // update local state
-  const idx = (state.daily || []).findIndex(r => String(r.date) === dateStr);
-  if (idx >= 0) state.daily[idx] = Object.assign({}, state.daily[idx], row);
-  else (state.daily || (state.daily=[])).push(row);
+  state.dailyOverrides[dateStr] = {
+    activeKcalsOverride: row.activeKcalsOverride,
+    source: row.source,
+    updatedAt: row.updatedAt
+  };
   saveState();
-
-  // persist if backend available
   if (SHEETS_ENDPOINT) {
-    try { await api('upsert', { sheet:'Daily Summary', row }); }
-    catch (e) { console.warn('upsert Daily Summary failed', e); }
+    try { await api('upsert', { sheet: 'Daily Summary', row }); }
+    catch(e){ console.warn('Daily override upsert failed', e); }
   }
 }
-  function macroPlan(){
+async function clearDailyOverride(dateStr){
+  if (!dateStr) dateStr = todayStr();
+  delete (state.dailyOverrides||{})[dateStr];
+  saveState();
+  if (SHEETS_ENDPOINT) {
+    try { await api('delete', { sheet:'Daily Summary', id:`ds_${dateStr}` }); }
+    catch(e){ console.warn('Daily override delete failed', e); }
+  }
+}
+
+/* ---------- macro plan (use override for actToday) ---------- */
+function macroPlan(){
   const s=state.settings; const bw=toNum(s.bodyWeightKg,80);
   const protein = Math.max(bw*toNum(s.proteinPerKg,2.0), bw*1.6);
   let ckg=s.modDayCarb_g_per_kg;
@@ -484,7 +490,7 @@ async function saveActiveOverride(dateStr, value){
   } else if (strat === 'keto') {
     const carbsFixed = 30;
     const kcP = protein*4;
-    const actToday = state.exercises.filter(e=> e.date===todayStr()).reduce((a,b)=> a+correctedActiveCalories(b),0);
+    const actToday = getActiveForDate(todayStr());
     const tdee = toNum(s.ree,1950)+actToday;
     let target=tdee;
     if(s.goal==='loss'){ target-=toNum(s.deficit,400); }
@@ -501,7 +507,7 @@ async function saveActiveOverride(dateStr, value){
   const carbs = bw*ckg;
   const fatsMin=bw*toNum(s.fat_g_per_kg,0.8);
   const kcP=protein*4, kcC=carbs*4;
-  const actToday = state.exercises.filter(e=> e.date===todayStr()).reduce((a,b)=> a+correctedActiveCalories(b),0);
+  const actToday = getActiveForDate(todayStr());
   const tdee = toNum(s.ree,1950)+actToday;
   let target=tdee;
   if(s.goal==='loss'){ target-=toNum(s.deficit,400); }
@@ -516,8 +522,12 @@ function renderDashboard(){
   const el=$('#view-dashboard'); const d=todayStr(); const totals=calcTotals(d);
   const tdee = toNum(state.settings.ree,1950)+totals.active;
   const goal=state.settings.goal; const def=toNum(state.settings.deficit,400);
-  let target=tdee; if(goal==='loss'){ target=tdee-def; } else if(goal==='recomp'){ target=tdee-Math.min(def,300); } else if(goal==='gain'){ target=tdee+200; }
+  let target=tdee;
+  if(goal==='loss'){ target=tdee-def; }
+  else if(goal==='recomp'){ target=tdee-Math.min(def,300); }
+  else if(goal==='gain'){ target=tdee+200; }
   const balance = target - totals.calFood;
+
   el.innerHTML = `
     <div class="panel">
       <div class="row">
@@ -525,7 +535,7 @@ function renderDashboard(){
         <div class="stat"><b>${fmt1(totals.p)} g</b><div class="small muted">Protein</div></div>
         <div class="stat"><b>${fmt1(totals.c)} g</b><div class="small muted">Carbs</div></div>
         <div class="stat"><b>${fmt1(totals.f)} g</b><div class="small muted">Fat</div></div>
-        <div class="stat"><b>${fmt1(totals.active)}</b><div class="small muted">Corrected active</div></div>
+        <div class="stat"><b>${fmt1(totals.active)}</b><div class="small muted">Active (override-aware)</div></div>
         <div class="stat"><b>${fmt1(tdee)}</b><div class="small muted">TDEE est.</div></div>
         <div class="stat"><b>${fmt1(target)}</b><div class="small muted">Target intake</div></div>
         <div class="stat"><b>${fmt1(balance)}</b><div class="small muted">Remaining</div></div>
@@ -673,7 +683,6 @@ function renderFood(){
       const desc=$('#f-item').value.trim(); if(!desc){ toast('Enter a food description'); return; }
       const r=await lookupMacrosWithAI(desc);
       $('#f-cal').value=r.calories||''; $('#f-prot').value=r.protein||''; $('#f-carb').value=r.carbs||''; $('#f-fat').value=r.fat||'';
-      // seed library too
       if (SHEETS_ENDPOINT) {
         api('foodlib.upsert', {
           row: { name: desc, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, source:'ai' }
@@ -750,12 +759,12 @@ function renderFoodTable(){
       <tbody>
         ${rows.map(r=>`
           <tr>
-              ${['date','time','item','calories','protein','carbs','fat','notes'].map(k=>{
+            ${['date','time','item','calories','protein','carbs','fat','notes'].map(k=>{
               let val = r[k] ?? '';
               if (k === 'date') val = showDate(val);
               if (k === 'time') val = showTime(val);
-             return `<td contenteditable class="inline-edit" data-id="${r.id}" data-field="${k}">${val}</td>`;
-             }).join('')}
+              return `<td contenteditable class="inline-edit" data-id="${r.id}" data-field="${k}">${val}</td>`;
+            }).join('')}
             <td><button class="btn danger small" data-del="${r.id}">Del</button></td>
           </tr>`).join('')}
       </tbody>
@@ -788,20 +797,21 @@ function renderExercise(){
   const el=$('#view-ex');
   el.innerHTML = `
     <div class="panel">
-  <h3 class="small">Daily Active Calories (Total)</h3>
-  <div class="grid g4">
-    <div><label>Date</label><input id="ds-date" type="date" value="${todayStr()}"></div>
-    <div>
-      <label>Total active kcals for day</label>
-      <input id="ds-active" type="number" placeholder="e.g. 850">
-      <div class="small muted">Includes exercise + other activity (watch/EPOCH). You can update throughout the day.</div>
+      <h3 class="small">Daily Active Calories (Total)</h3>
+      <div class="grid g4">
+        <div><label>Date</label><input id="ds-date" type="date" value="${todayStr()}"></div>
+        <div>
+          <label>Total active kcals for day</label>
+          <input id="ds-active" type="number" placeholder="e.g. 850">
+          <div class="small muted">Includes exercise + other activity (watch/EPOCH). Update anytime.</div>
+        </div>
+      </div>
+      <div class="row right">
+        <button class="btn"           id="ds-save">Save override</button>
+        <button class="btn secondary" id="ds-clear">Clear override</button>
+      </div>
+      <div class="small muted" id="ds-note" style="margin-top:6px"></div>
     </div>
-  </div>
-  <div class="row right">
-    <button class="btn" id="ds-save">Save override</button>
-    <button class="btn secondary" id="ds-clear">Clear override</button>
-  </div>
-</div>
 
     <div class="panel">
       <h3 class="small">Add Exercise</h3>
@@ -836,6 +846,38 @@ function renderExercise(){
       <div id="e-table"></div>
     </div>
   `;
+
+  // Wire override UI
+  const dsDate = $('#ds-date');
+  const dsActive = $('#ds-active');
+  const dsNote = $('#ds-note');
+  function refreshOverrideUI(){
+    const d = dsDate.value || todayStr();
+    const o = state.dailyOverrides[d];
+    if (o) {
+      dsActive.value = o.activeKcalsOverride ?? '';
+      dsNote.textContent = `Last set ${new Date(o.updatedAt).toLocaleString()} (${o.source||'manual'})`;
+    } else {
+      dsActive.value = '';
+      dsNote.textContent = 'No override set for this date.';
+    }
+  }
+  dsDate.addEventListener('change', refreshOverrideUI);
+  $('#ds-save').onclick = async ()=>{
+    const d = dsDate.value || todayStr();
+    await setDailyOverride(d, toNum(dsActive.value,0), 'manual');
+    refreshOverrideUI();
+    if ($('#view-dashboard').style.display !== 'none') renderDashboard();
+  };
+  $('#ds-clear').onclick = async ()=>{
+    const d = dsDate.value || todayStr();
+    await clearDailyOverride(d);
+    refreshOverrideUI();
+    if ($('#view-dashboard').style.display !== 'none') renderDashboard();
+  };
+  refreshOverrideUI();
+
+  // Exercise add + table
   $('#e-add').onclick = ()=>{
     const e={ id:uid(), date:$('#e-date').value||todayStr(), type:$('#e-type').value, durationMin:toNum($('#e-dur').value,0),
       intensity:$('#e-int').value, deviceCalories:toNum($('#e-dev').value,0), avgHR:toNum($('#e-hr').value,0), rpe:toNum($('#e-rpe').value,0), notes:$('#e-notes').value.trim() };
@@ -857,12 +899,11 @@ function renderExerciseTable(){
       <tbody>
         ${rows.map(r=>`
           <tr>
-        ${['date','type','durationMin','intensity','deviceCalories','avgHR','rpe','notes'].map(k=>{
-         let val = r[k] ?? '';
-         if (k === 'date') val = showDate(val);
-         if (k === 'time') val = showTime(val);
-         return `<td contenteditable class="inline-edit" data-exid="${r.id}" data-field="${k}">${val}</td>`;
-        }).join('')}
+            ${['date','type','durationMin','intensity','deviceCalories','avgHR','rpe','notes'].map(k=>{
+              let val = r[k] ?? '';
+              if (k === 'date') val = showDate(val);
+              return `<td contenteditable class="inline-edit" data-exid="${r.id}" data-field="${k}">${val}</td>`;
+            }).join('')}
             <td>${fmt1(correctedActiveCalories(r))}</td>
             <td><button class="btn danger small" data-del="${r.id}">Del</button></td>
           </tr>`).join('')}
@@ -874,12 +915,10 @@ function renderExerciseTable(){
     cell.addEventListener('blur', ()=>{
       const id=cell.dataset.exid, field=cell.dataset.field;
       const row=state.exercises.find(x=> x.id===id); if(!row) return;
-      const numeric=['durationMin','deviceCalories','avgHR','rpe'].includes(field);
       const raw = cell.textContent.trim();
-       if (field === 'date') row.date = dateKey(raw);
-       else if (field === 'time') row.time = timeKey(raw);
-       else if (['durationMin','deviceCalories','avgHR','rpe'].includes(field)) row[field] = toNum(raw,0);
-       else row[field] = raw;
+      if (field === 'date') row.date = dateKey(raw);
+      else if (['durationMin','deviceCalories','avgHR','rpe'].includes(field)) row[field] = toNum(raw,0);
+      else row[field] = raw;
       saveState(); if(SHEETS_ENDPOINT) pushRow('Activity Log', row); renderExerciseTable();
     });
   });
@@ -995,8 +1034,8 @@ function renderData(){
   `;
   function download(name,text){ const a=document.createElement('a'); a.href='data:text/plain;charset=utf-8,'+encodeURIComponent(text); a.download=name; a.style.display='none'; document.body.appendChild(a); a.click(); a.remove(); }
   $('#exp-food').onclick = ()=> download(`foods_${todayStr()}.csv`, foodsCSV);
-  $('#exp-ex').onclick = ()=> download(`exercises_${todayStr()}.csv`, exCSV);
-  $('#exp-meals').onclick = ()=> download(`meals_${todayStr()}.csv`, mealsCSV);
+  $('#exp-ex').onclick   = ()=> download(`exercises_${todayStr()}.csv`, exCSV);
+  $('#exp-meals').onclick= ()=> download(`meals_${todayStr()}.csv`, mealsCSV);
   $('#exp-json').onclick = ()=> download(`ft_backup_${Date.now()}.json`, JSON.stringify(state,null,2));
 
   $('#imp-run').onclick = ()=>{
@@ -1140,11 +1179,11 @@ function renderSuggest(){
   const left = {kcal: mp.kcalsTarget - eaten.kcal, p: mp.protein - eaten.p, c: mp.carbs - eaten.c, f: mp.fats - eaten.f};
   const dt=state.settings.dayType;
   let timing=[];
-  if(dt==='high'){ timing=["Pre 2 to 3 h: 1 to 1.5 g/kg carbs + lean protein, low fat","During: 60 to 90 g carbs/h if over 90 min, sodium 500 to 800 mg/h","Post 0 to 2 h: 0.6 to 1.0 g/kg carbs + 30 to 50 g protein"]; }
-  else if(dt==='moderate'){ timing=["Pre 1 to 2 h: ~0.8 g/kg carbs + 25 to 35 g protein","During: 30 to 60 g carbs/h if over 60 min","Post: 0.4 to 0.8 g/kg carbs + 30 to 40 g protein"]; }
+  if(dt==='high'){ timing=["Pre 2–3 h: 1–1.5 g/kg carbs + lean protein, low fat","During: 60–90 g carbs/h if >90 min, sodium 500–800 mg/h","Post 0–2 h: 0.6–1.0 g/kg carbs + 30–50 g protein"]; }
+  else if(dt==='moderate'){ timing=["Pre 1–2 h: ~0.8 g/kg carbs + 25–35 g protein","During: 30–60 g carbs/h if >60 min","Post: 0.4–0.8 g/kg carbs + 30–40 g protein"]; }
   else { timing=["Protein-forward meals","Place most carbs around training","Hydrate and salt as needed"]; }
 
-  const glp1Tips = state.settings.glp1? ["Smaller, more frequent meals","Front load protein earlier in day","Hydrate on waking before first food","Keep ultra fatty foods moderate if nausea prone"] : [];
+  const glp1Tips = state.settings.glp1? ["Smaller, more frequent meals","Front-load protein earlier in day","Hydrate on waking before first food","Keep ultra-fatty foods moderate if nausea-prone"] : [];
 
   el.innerHTML = `
     <div class="panel">
@@ -1162,22 +1201,21 @@ function renderSuggest(){
         <li><b>Strategy:</b> ${stratNote}</li>
         ${hexLine}
         <li><b>Fueling timing:</b> ${timing.join(' • ')}</li>
-        <li><b>Protein floor:</b> close ${fmt1(mp.protein)} g by dinner. Add a 30 to 40 g protein snack if behind.</li>
+        <li><b>Protein floor:</b> close ${fmt1(mp.protein)} g by dinner. Add a 30–40 g protein snack if behind.</li>
         ${state.settings.glp1 ? `<li><b>GLP-1 adjustments:</b> ${glp1Tips.join(' • ')}</li>` : ''}
-        <li><b>Electrolytes:</b> 500 to 800 mg sodium per hour in heat or heavy sweat.</li>
+        <li><b>Electrolytes:</b> 500–800 mg sodium per hour in heat or heavy sweat.</li>
       </ul>
     </div>
   `;
 }
 
-/* ---------- boot: render, then first load sync and rerender ---------- */
+/* ---------- boot: render, then first-load sync ---------- */
 renderTabs();
 switchView('dashboard');
 
 (async function firstLoadSync(){
   const key = 'ft-initial-sync:' + (SHEETS_ENDPOINT || 'none');
   const already = localStorage.getItem(key);
-
   if (!SHEETS_ENDPOINT) return;
   if (already === '1') return;
 
