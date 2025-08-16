@@ -911,36 +911,39 @@ function renderExercise(){
 }
 function renderExerciseTable(){
   const container = $('#e-table');
-  if (!container) return;
 
-  // Which date are we showing? (filter or today)
-  const rawFilter = ($('#e-filter') && $('#e-filter').value) || '';
-  const dateForView = rawFilter ? dateKey(rawFilter) : dateKey(todayStr());
+  // which date is the table showing?
+  const picked = $('#e-filter') ? $('#e-filter').value : '';
+  const dateShown = picked ? dateKey(picked) : null;
 
-  // Filter rows for the table
-  const rows = state.exercises.filter(r => !rawFilter || dateKey(r.date) === dateForView);
+  // rows for that date (or all, when filter is empty)
+  const rows = state.exercises.filter(r => !dateShown || dateKey(r.date) === dateShown);
 
-  // Sum corrected kcals from the visible rows
-  const totalActive = rows.reduce((a,b) => a + correctedActiveCalories(b), 0);
+  // totals for the visible rows
+  const totalActive = rows.reduce((a,b)=> a + correctedActiveCalories(b), 0);
 
-  // Find manual override for the date we’re viewing
-  const oRow = (state.daily || []).find(r => dateKey(r.date) === dateForView);
-  const overrideVal = oRow && oRow.sheets && Number.isFinite(+oRow.sheets.activeKcalsOverride)
-  ? +oRow.sheets.activeKcalsOverride 
-  : null;
+  // ---- override badge (uses the same date the table is filtered to) ----
+  // getActiveOverride returns a number or null
+  const oVal = getActiveOverride(dateShown || todayStr());
+  const overrideBadge = (oVal !== null)
+    ? `<span class="pill" title="Daily override in effect for ${dateShown || todayStr()}">
+         Override: ${fmt1(oVal)} kcal
+       </span>`
+    : '';
 
+  // ---- render ----
   container.innerHTML = `
-  <div class="row">
-    <div class="pill">Entries: ${rows.length}</div>
-    <div class="pill">Corrected active kcals: ${fmt1(totalActive)}</div>
-    ${overrideVal !== null ? `<div class="pill">Override (${dateForView}): ${fmt1(overrideVal)} kcal</div>` : ''}
-  </div>
-
+    <div class="row" style="gap:8px;align-items:center;margin-bottom:6px">
+      <span class="pill">Entries: ${rows.length}</span>
+      <span class="pill">Corrected active kcals: ${fmt1(totalActive)}</span>
+      ${overrideBadge}
+    </div>
     <table>
       <thead>
         <tr>
           <th>Date</th><th>Type</th><th>Dur</th><th>Int</th>
-          <th>Device kcal</th><th>Avg HR</th><th>RPE</th><th>Notes</th><th>Adj kcal</th><th></th>
+          <th>Device kcal</th><th>Avg HR</th><th>RPE</th><th>Notes</th>
+          <th>Adj kcal</th><th></th>
         </tr>
       </thead>
       <tbody>
@@ -957,11 +960,10 @@ function renderExerciseTable(){
         `).join('')}
       </tbody>
     </table>
-
     <div class="small muted">Edit saves on blur. Activity correction factor applies.</div>
   `;
 
-  // Inline edits
+  // inline edits
   $$('#e-table [contenteditable]').forEach(cell=>{
     cell.addEventListener('blur', ()=>{
       const id = cell.dataset.exid, field = cell.dataset.field;
@@ -976,7 +978,7 @@ function renderExerciseTable(){
     });
   });
 
-  // Deletes
+  // deletes
   $$('#e-table [data-del]').forEach(btn=>{
     btn.onclick = ()=>{
       const id = btn.getAttribute('data-del');
