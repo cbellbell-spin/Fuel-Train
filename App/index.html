@@ -891,16 +891,36 @@ function renderExercise(){
   renderExerciseTable();
 }
 function renderExerciseTable(){
-  const container=$('#e-table'); const filter=$('#e-filter').value;
-  const rows = state.exercises.filter(r=> !filter || dateKey(r.date) === filter);
-  const totalActive = rows.reduce((a,b)=> a+correctedActiveCalories(b),0);
+  const container = $('#e-table');
+  const filterDate = $('#e-filter').value;        // '' means "All"
+  const dateForBadge = filterDate || todayStr();  // which date to check override for
+
+  // rows shown in the table (respecting filter)
+  const rows = state.exercises.filter(r => !filterDate || dateKey(r.date) === filterDate);
+
+  // corrected active kcal *from the rows shown*
+  const totalActive = rows.reduce((a,b) => a + correctedActiveCalories(b), 0);
+
+  // check if there’s a manual override for the date being viewed
+  const overrideVal = getActiveOverride(dateForBadge);   // number | null
+  const hasOverride = overrideVal !== null;
+
   container.innerHTML = `
-    <div class="row"><div class="pill">Entries: ${rows.length}</div><div class="pill">Corrected active kcals: ${fmt1(totalActive)}</div></div>
-    ${overrideToday ? '<div class="pill">Override</div>' : ''};
+    <div class="row">
+      <div class="pill">Entries: ${rows.length}</div>
+      <div class="pill">Corrected active kcals: ${fmt1(totalActive)}</div>
+      ${hasOverride ? `<div class="pill">Override (${dateForBadge}): ${fmt1(overrideVal)} kcal</div>` : ''}
+    </div>
+
     <table>
-      <thead><tr><th>Date</th><th>Type</th><th>Dur</th><th>Int</th><th>Device kcal</th><th>Avg HR</th><th>RPE</th><th>Notes</th><th>Adj kcal</th><th></th></tr></thead>
+      <thead>
+        <tr>
+          <th>Date</th><th>Type</th><th>Dur</th><th>Int</th>
+          <th>Device kcal</th><th>Avg HR</th><th>RPE</th><th>Notes</th><th>Adj kcal</th><th></th>
+        </tr>
+      </thead>
       <tbody>
-        ${rows.map(r=>`
+        ${rows.map(r => `
           <tr>
             ${['date','type','durationMin','intensity','deviceCalories','avgHR','rpe','notes'].map(k=>{
               let val = r[k] ?? '';
@@ -909,27 +929,34 @@ function renderExerciseTable(){
             }).join('')}
             <td>${fmt1(correctedActiveCalories(r))}</td>
             <td><button class="btn danger small" data-del="${r.id}">Del</button></td>
-          </tr>`).join('')}
+          </tr>
+        `).join('')}
       </tbody>
     </table>
+
     <div class="small muted">Edit saves on blur. Activity correction factor applies.</div>
   `;
+
+  // inline edit handlers
   $$('#e-table [contenteditable]').forEach(cell=>{
     cell.addEventListener('blur', ()=>{
-      const id=cell.dataset.exid, field=cell.dataset.field;
-      const row=state.exercises.find(x=> x.id===id); if(!row) return;
+      const id = cell.dataset.exid, field = cell.dataset.field;
+      const row = state.exercises.find(x => x.id === id); if (!row) return;
       const raw = cell.textContent.trim();
       if (field === 'date') row.date = dateKey(raw);
       else if (['durationMin','deviceCalories','avgHR','rpe'].includes(field)) row[field] = toNum(raw,0);
       else row[field] = raw;
-      saveState(); if(SHEETS_ENDPOINT) pushRow('Activity Log', row); renderExerciseTable();
+      saveState(); if (SHEETS_ENDPOINT) pushRow('Activity Log', row);
+      renderExerciseTable();
     });
   });
+
+  // delete handlers
   $$('#e-table [data-del]').forEach(btn=>{
     btn.onclick = ()=>{
-      const id=btn.getAttribute('data-del');
-      state.exercises = state.exercises.filter(x=> x.id!==id); saveState();
-      if(SHEETS_ENDPOINT) deleteRow('Activity Log', id);
+      const id = btn.getAttribute('data-del');
+      state.exercises = state.exercises.filter(x => x.id !== id);
+      saveState(); if (SHEETS_ENDPOINT) deleteRow('Activity Log', id);
       renderExerciseTable();
     };
   });
