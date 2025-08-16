@@ -794,7 +794,26 @@ function renderFoodTable(){
     };
   });
 }
+function getActiveOverride(dateStr) {
+  const d = dateKey(dateStr || todayStr());
+  const row = (state.daily || []).find(r => dateKey(r.date) === d);
+  const v = row ? toNum(row.activeKcalsOverride, NaN) : NaN;
+  return Number.isFinite(v) ? v : null;  // null = no override
+}
+function saveActiveOverride(dateStr, value) {
+  const d = dateKey(dateStr || todayStr());
+  const row = (state.daily || []).find(r => dateKey(r.date) === d);
 
+  if (row) {
+    row.activeKcalsOverride = value;
+  } else {
+    (state.daily = state.daily || []).push({
+      date: d,
+      activeKcalsOverride: value
+    });
+  }
+  persistState();  // make sure it survives reload
+}
 function renderExercise(){
   const el=$('#view-ex');
   el.innerHTML = `
@@ -906,14 +925,16 @@ function renderExerciseTable(){
 
   // Find manual override for the date we’re viewing
   const oRow = (state.daily || []).find(r => dateKey(r.date) === dateForView);
-  const overrideVal = oRow && Number.isFinite(+oRow.activeKcalsOverride) ? +oRow.activeKcalsOverride : null;
+  const overrideVal = oRow && oRow.sheets && Number.isFinite(+oRow.sheets.activeKcalsOverride)
+  ? +oRow.sheets.activeKcalsOverride 
+  : null;
 
   container.innerHTML = `
-    <div class="row">
-      <div class="pill">Entries: ${rows.length}</div>
-      <div class="pill">Corrected active kcals: ${fmt1(totalActive)}</div>
-      ${overrideVal !== null ? `<div class="pill">Override (${dateForView}): ${fmt1(overrideVal)} kcal</div>` : ''}
-    </div>
+  <div class="row">
+    <div class="pill">Entries: ${rows.length}</div>
+    <div class="pill">Corrected active kcals: ${fmt1(totalActive)}</div>
+    ${overrideVal !== null ? `<div class="pill">Override (${dateForView}): ${fmt1(overrideVal)} kcal</div>` : ''}
+  </div>
 
     <table>
       <thead>
