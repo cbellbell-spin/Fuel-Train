@@ -520,6 +520,8 @@ function macroPlan(){
 /* ---------- views ---------- */
 function renderDashboard(){
   const el=$('#view-dashboard'); const d=todayStr(); const totals=calcTotals(d);
+  const overrideToday = Array.isArray(state.daily)
+  && state.daily.some(r => String(r.date) === d && Number.isFinite(+r.activeKcalsOverride));
   const tdee = toNum(state.settings.ree,1950)+totals.active;
   const goal=state.settings.goal; const def=toNum(state.settings.deficit,400);
   let target=tdee;
@@ -894,6 +896,7 @@ function renderExerciseTable(){
   const totalActive = rows.reduce((a,b)=> a+correctedActiveCalories(b),0);
   container.innerHTML = `
     <div class="row"><div class="pill">Entries: ${rows.length}</div><div class="pill">Corrected active kcals: ${fmt1(totalActive)}</div></div>
+    ${overrideToday ? '<div class="pill">Override</div>' : ''};
     <table>
       <thead><tr><th>Date</th><th>Type</th><th>Dur</th><th>Int</th><th>Device kcal</th><th>Avg HR</th><th>RPE</th><th>Notes</th><th>Adj kcal</th><th></th></tr></thead>
       <tbody>
