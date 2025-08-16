@@ -911,27 +911,29 @@ function renderExercise(){
 }
 function renderExerciseTable(){
   const container = $('#e-table');
+  if (!container) return;
 
-  // which date is the table showing?
+  // Which date is the table showing?
   const picked = $('#e-filter') ? $('#e-filter').value : '';
   const dateShown = picked ? dateKey(picked) : null;
 
-  // rows for that date (or all, when filter is empty)
+  // Rows for that date (or all when filter is empty)
   const rows = state.exercises.filter(r => !dateShown || dateKey(r.date) === dateShown);
 
-  // totals for the visible rows
+  // Totals for visible rows
   const totalActive = rows.reduce((a,b)=> a + correctedActiveCalories(b), 0);
 
-  // ---- override badge (uses the same date the table is filtered to) ----
-  // getActiveOverride returns a number or null
-  const oVal = getActiveOverride(dateShown || todayStr());
-  const overrideBadge = (oVal !== null)
-    ? `<span class="pill" title="Daily override in effect for ${dateShown || todayStr()}">
+  // ---- override badge (uses the filter date or today) ----
+  const queryDate = dateShown || todayStr();
+  const oVal = getActiveOverride(queryDate);     // number or null
+  const hasOverride = Number.isFinite(oVal);     // <- handles 0 correctly
+
+  const overrideBadge = hasOverride
+    ? `<span class="pill" title="Override in effect for ${queryDate}">
          Override: ${fmt1(oVal)} kcal
        </span>`
     : '';
 
-  // ---- render ----
   container.innerHTML = `
     <div class="row" style="gap:8px;align-items:center;margin-bottom:6px">
       <span class="pill">Entries: ${rows.length}</span>
@@ -966,8 +968,8 @@ function renderExerciseTable(){
   // inline edits
   $$('#e-table [contenteditable]').forEach(cell=>{
     cell.addEventListener('blur', ()=>{
-      const id = cell.dataset.exid, field = cell.dataset.field;
-      const row = state.exercises.find(x => x.id === id); if (!row) return;
+      const id=cell.dataset.exid, field=cell.dataset.field;
+      const row=state.exercises.find(x=> x.id===id); if(!row) return;
       const raw = cell.textContent.trim();
       if (field === 'date') row.date = dateKey(raw);
       else if (['durationMin','deviceCalories','avgHR','rpe'].includes(field)) row[field] = toNum(raw,0);
@@ -981,8 +983,8 @@ function renderExerciseTable(){
   // deletes
   $$('#e-table [data-del]').forEach(btn=>{
     btn.onclick = ()=>{
-      const id = btn.getAttribute('data-del');
-      state.exercises = state.exercises.filter(x => x.id !== id);
+      const id=btn.getAttribute('data-del');
+      state.exercises = state.exercises.filter(x=> x.id!==id);
       saveState();
       if (SHEETS_ENDPOINT) deleteRow('Activity Log', id);
       renderExerciseTable();
