@@ -159,6 +159,28 @@
   transform: translateY(0);
   box-shadow: none;
 }
+/* --- One-row macros (desktop), responsive on smaller screens --- */
+.macro-row{
+  display: grid;
+  grid-template-columns: repeat(4, 1fr); /* 4 across on desktop */
+  gap: 8px;
+  align-items: end;
+}
+.macro-row input{
+  padding: 8px 10px;      /* slightly tighter than normal inputs */
+  font-size: 14px;
+  height: 38px;           /* keeps the row visually compact */
+}
+
+/* Tablet: 2 per row */
+@media (max-width: 900px){
+  .macro-row{ grid-template-columns: repeat(2, 1fr); }
+}
+
+/* Small phones: 1 per row (still fine) */
+@media (max-width: 520px){
+  .macro-row{ grid-template-columns: 1fr; }
+}
 
 </style>
 </head>
@@ -709,34 +731,31 @@ function renderFood(){
     <div class="panel">
       <h3 class="small">Add Food</h3>
 
-      <!-- Top row: Date | Time | Item (+ AI button tight to item) -->
-      <!-- Top row: Date | Time (as a pair) | Item (+ AI) -->
-<div class="microgrid-2" style="grid-column: 1 / span 2">
-  <div>
-    <label>Date</label>
-    <input id="f-date" type="date" value="${todayStr()}">
-  </div>
-  <div>
-    <label>Time</label>
-    <input id="f-time" type="time" value="${new Date().toTimeString().slice(0,5)}">
-  </div>
-</div>
-
-<div style="grid-column: 3 / span 2">
-  <label>Item</label>
-  <div class="inline-row">
-    <input id="f-item" class="grow" placeholder="e.g., turkey sandwich on sourdough">
-    <!-- IMPORTANT: standardize the style here -->
-    <button class="btn secondary small" id="f-ai-inline" title="Lookup macros with AI">Lookup with AI</button>
-  </div>
-  <div id="f-suggest" class="compact-note"></div>
-</div>
-
-
-        <!-- TWO COLUMNS OF MACROS:
-             Left macro block (under Date/Time): Calories + Protein
-             Right macro block (under Item): Carbs + Fat -->
+      <div class="grid g4" style="row-gap:12px">
+        <!-- Date + Time (paired; stacks on small screens via .microgrid-2) -->
         <div class="microgrid-2" style="grid-column: 1 / span 2">
+          <div>
+            <label>Date</label>
+            <input id="f-date" type="date" value="${todayStr()}">
+          </div>
+          <div>
+            <label>Time</label>
+            <input id="f-time" type="time" value="${new Date().toTimeString().slice(0,5)}">
+          </div>
+        </div>
+
+        <!-- Item with inline AI button -->
+        <div style="grid-column: 3 / span 2">
+          <label>Item</label>
+          <div class="inline-row">
+            <input id="f-item" class="grow" placeholder="e.g., turkey sandwich on sourdough">
+            <button class="btn secondary" id="f-ai-inline" title="Lookup macros with AI">Lookup with AI</button>
+          </div>
+          <div id="f-suggest" class="compact-note"></div>
+        </div>
+
+        <!-- Macros: one compact row (desktop 4-up; responsive in CSS) -->
+        <div class="macro-row" style="grid-column: span 4">
           <div>
             <label>Calories</label>
             <input id="f-cal" type="number" inputmode="decimal">
@@ -745,9 +764,6 @@ function renderFood(){
             <label>Protein (g)</label>
             <input id="f-prot" type="number" step="0.1" inputmode="decimal">
           </div>
-        </div>
-
-        <div class="microgrid-2" style="grid-column: 3 / span 2">
           <div>
             <label>Carbs (g)</label>
             <input id="f-carb" type="number" step="0.1" inputmode="decimal">
@@ -758,12 +774,13 @@ function renderFood(){
           </div>
         </div>
 
+        <!-- Notes -->
         <div style="grid-column: span 4">
           <label>Notes</label>
           <textarea id="f-notes" placeholder="Optional: brand, serving size, adjustments…"></textarea>
         </div>
 
-        <!-- Meal plan helpers stay as a compact subpanel -->
+        <!-- Meal plan helpers (compact subpanel) -->
         <div class="panel" style="margin-top:6px; grid-column: span 4; padding:12px">
           <div class="row" style="gap:8px; align-items:flex-end">
             <div style="flex:1">
@@ -850,7 +867,7 @@ function renderFood(){
     renderFood();
   };
 
-  // AI lookup (inline, tight to Item)
+  // AI lookup (inline)
   const doAILookup = async ()=>{
     try{
       const desc = $('#f-item').value.trim();
@@ -860,7 +877,6 @@ function renderFood(){
       $('#f-prot').value = r.protein  ?? '';
       $('#f-carb').value = r.carbs    ?? '';
       $('#f-fat').value  = r.fat      ?? '';
-      // seed library too
       if (SHEETS_ENDPOINT) {
         api('foodlib.upsert', {
           row: { name: desc, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, source:'ai' }
@@ -896,7 +912,7 @@ function renderFood(){
     renderFood();
   };
 
-  // Suggestions (Food Library) — stays under Item, compact
+  // Suggestions (Food Library)
   const fItem = $('#f-item');
   let suggestTimer = 0;
   fItem.addEventListener('input', ()=>{
