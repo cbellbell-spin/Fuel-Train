@@ -29,10 +29,23 @@
   label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
   input, select, textarea{width:100%;padding:10px;background:#0b1220;color:var(--text);border:1px solid #1e293b;border-radius:10px}
   textarea{min-height:70px;resize:vertical}
-  .btn{background:var(--accent);color:#062;border:none;padding:10px 14px;border-radius:10px;font-weight:600;cursor:pointer}
-  .btn.secondary{background:var(--soft);color:var(--text);border:1px solid #253045}
-  .btn.warn{background:var(--warn);color:#211}
-  .btn.danger{background:var(--danger);color:#320}
+  /* --- Unified Buttons --- */
+.btn{
+  background: var(--accent);
+  color: #fff;                 /* white text for readability */
+  border: none;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter .15s ease, transform .02s ease;
+}
+.btn:hover{ filter: brightness(1.05); }
+.btn:active{ transform: translateY(1px); }
+.btn:focus-visible{ outline: 2px solid var(--accent2); outline-offset: 2px; }
+
+.btn.small{ padding: 8px 12px; font-size: 14px; }
+  
   .stat{background:var(--soft);padding:12px;border-radius:12px;border:1px solid #253045}
   .stat b{font-size:18px;display:block}
   table{width:100%;border-collapse:separate;border-spacing:0;margin-top:8px}
@@ -45,38 +58,50 @@
   .small{font-size:12px}
   .inline-edit{padding:6px 8px;border:1px dashed #334155;border-radius:6px;background:#0b1220}
   .kbd{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1220;border:1px solid #1e293b;border-bottom-width:3px;padding:2px 6px;border-radius:6px}
-/* --- Food form tightening helpers --- */
-.inline-row { display:flex; gap:8px; align-items:center; }
-.inline-row .grow { flex:1; }
-.microgrid-2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
-.help-inline { margin-top:6px; color:var(--muted); font-size:12px; }
-/* Compact helper for the inline Item + AI button row */
-.inline-row { display:flex; gap:8px; align-items:center; }
-.inline-row .grow { flex:1; }
-
-/* High-contrast quiet button (desktop-friendly) */
-.button-quiet {
-  background: #182234;               /* slightly lighter than inputs */
-  border: 1px solid #2b3b56;
-  color: #d8e2f0;
-  padding: 8px 12px;
+/* --- Unified Buttons --- */
+.btn{
+  background: var(--accent);
+  color: #fff;                 /* white text for readability */
+  border: none;
+  padding: 10px 14px;
   border-radius: 10px;
+  font-weight: 700;
   cursor: pointer;
-  line-height: 1;
-  transition: background .15s ease, border-color .15s ease, transform .05s ease;
+  transition: filter .15s ease, transform .02s ease;
 }
-.button-quiet.small { font-size: 12px; padding: 8px 10px; }
+.btn:hover{ filter: brightness(1.05); }
+.btn:active{ transform: translateY(1px); }
+.btn:focus-visible{ outline: 2px solid var(--accent2); outline-offset: 2px; }
 
-/* Better affordance on hover/focus */
-.button-quiet:hover { background:#1f2b44; border-color:#3a4f73; }
-.button-quiet:active { transform: translateY(1px); }
-.button-quiet:focus-visible {
-  outline: 2px solid rgba(96,165,250,.35); /* uses --accent2 vibe */
-  outline-offset: 2px;
+.btn.small{ padding: 8px 12px; font-size: 14px; }
+
+/* “Quiet” / secondary button */
+.btn.secondary{
+  background: var(--soft);
+  color: #e9eef6;              /* brighter white-ish for contrast */
+  border: 1px solid #253045;
+}
+.btn.secondary:hover{ border-color:#385072; }
+
+/* Danger button (delete) */
+.btn.danger{
+  background: var(--danger);
+  color: #fff;                 /* fix dark text on red */
+  border: none;
 }
 
-/* Align the button tightly with the Item input */
-.inline-row .button-quiet { flex: 0 0 auto; height: 36px; }
+/* Back-compat: make any old .button-quiet look identical to our secondary button */
+.button-quiet,
+.button-quiet.small{
+  background: var(--soft);
+  color: #e9eef6;
+  border: 1px solid #253045;
+  border-radius: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 10px 14px;
+}
+.button-quiet.small{ padding: 8px 12px; font-size: 14px; }
 
 /* Phone: let the row wrap (your existing rule kept) */
 @media (max-width:720px){
@@ -104,6 +129,19 @@
   .grid.g2 {
     grid-template-columns: 1fr; /* stack instead of side by side */
   }
+}
+/* Mobile layout tweaks for Log Food top row */
+@media (max-width: 720px){
+  /* Date/Time pair becomes a single column */
+  .microgrid-2 { grid-template-columns: 1fr !important; }
+
+  /* Item row: force AI button under the text field */
+  .inline-row{
+    flex-direction: column;     /* stack vertically on phones */
+    align-items: stretch;
+  }
+  .inline-row .grow{ width: 100%; }
+  #f-ai-inline{ width: 100%; margin-top: 8px; }
 }
   
 .compact-note { margin-top:6px; color:var(--muted); font-size:12px; }
@@ -672,27 +710,28 @@ function renderFood(){
       <h3 class="small">Add Food</h3>
 
       <!-- Top row: Date | Time | Item (+ AI button tight to item) -->
-      <div class="grid g4" style="row-gap:12px">
-        <div>
-          <label>Date</label>
-          <input id="f-date" type="date" value="${todayStr()}">
-        </div>
+      <!-- Top row: Date | Time (as a pair) | Item (+ AI) -->
+<div class="microgrid-2" style="grid-column: 1 / span 2">
+  <div>
+    <label>Date</label>
+    <input id="f-date" type="date" value="${todayStr()}">
+  </div>
+  <div>
+    <label>Time</label>
+    <input id="f-time" type="time" value="${new Date().toTimeString().slice(0,5)}">
+  </div>
+</div>
 
-        <div>
-          <label>Time</label>
-          <input id="f-time" type="time" value="${new Date().toTimeString().slice(0,5)}">
-        </div>
+<div style="grid-column: 3 / span 2">
+  <label>Item</label>
+  <div class="inline-row">
+    <input id="f-item" class="grow" placeholder="e.g., turkey sandwich on sourdough">
+    <!-- IMPORTANT: standardize the style here -->
+    <button class="btn secondary small" id="f-ai-inline" title="Lookup macros with AI">Lookup with AI</button>
+  </div>
+  <div id="f-suggest" class="compact-note"></div>
+</div>
 
-        <div style="grid-column: span 2">
-          <label>Item</label>
-          <div class="inline-row">
-            <input id="f-item" class="grow" placeholder="e.g., turkey sandwich on sourdough">
-            <button type="button" class="button-quiet small" id="f-ai-inline" aria-label="Lookup macros with AI">
-  Lookup with AI
-</button>
-          </div>
-          <div id="f-suggest" class="compact-note"></div>
-        </div>
 
         <!-- TWO COLUMNS OF MACROS:
              Left macro block (under Date/Time): Calories + Protein
