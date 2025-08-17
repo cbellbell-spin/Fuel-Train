@@ -46,6 +46,18 @@
   .inline-edit{padding:6px 8px;border:1px dashed #334155;border-radius:6px;background:#0b1220}
   .kbd{font-family:ui-monospace,Menlo,Consolas,monospace;background:#0b1220;border:1px solid #1e293b;border-bottom-width:3px;padding:2px 6px;border-radius:6px}
 </style>
+ /* --- Food form tightening helpers --- */
+.inline-row { display:flex; gap:8px; align-items:center; }
+.inline-row .grow { flex:1; }
+.microgrid-2 { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.compact-note { margin-top:6px; color:var(--muted); font-size:12px; }
+.button-quiet { background:var(--soft); border:1px solid #253045; padding:8px 10px; border-radius:10px; cursor:pointer; }
+.button-quiet.small { font-size:12px; padding:6px 8px; }
+@media (max-width:720px){
+  /* make the top row wrap gracefully on phones */
+  .inline-row { flex-wrap:wrap; }
+}
+
 </head>
 <body>
 <header>
@@ -589,25 +601,65 @@ function renderDashboard(){
 }
 
 function renderFood(){
-  const el=$('#view-food');
+  const el = $('#view-food');
   el.innerHTML = `
     <div class="panel">
       <h3 class="small">Add Food</h3>
-      <div class="grid g4">
-        <div><label>Date</label><input id="f-date" type="date" value="${todayStr()}"></div>
-        <div><label>Time</label><input id="f-time" type="time" value="${new Date().toTimeString().slice(0,5)}"></div>
-        <div class="g3" style="grid-column: span 2">
-          <div><label>Item</label><input id="f-item"></div>
-          <div id="f-suggest" class="small"></div>
-          <div><label>Calories</label><input id="f-cal" type="number"></div>
-          <div><label>Protein (g)</label><input id="f-prot" type="number" step="0.1"></div>
-          <div><label>Carbs (g)</label><input id="f-carb" type="number" step="0.1"></div>
-          <div><label>Fat (g)</label><input id="f-fat" type="number" step="0.1"></div>
-        </div>
-        <div style="grid-column: span 4"><label>Notes</label><textarea id="f-notes"></textarea></div>
 
-        <div class="panel" style="margin-top:12px; grid-column: span 4">
-          <div class="row">
+      <!-- Top row: Date | Time | Item (+ AI button tight to item) -->
+      <div class="grid g4" style="row-gap:12px">
+        <div>
+          <label>Date</label>
+          <input id="f-date" type="date" value="${todayStr()}">
+        </div>
+
+        <div>
+          <label>Time</label>
+          <input id="f-time" type="time" value="${new Date().toTimeString().slice(0,5)}">
+        </div>
+
+        <div style="grid-column: span 2">
+          <label>Item</label>
+          <div class="inline-row">
+            <input id="f-item" class="grow" placeholder="e.g., turkey sandwich on sourdough">
+            <button class="button-quiet small" id="f-ai-inline" title="Lookup macros with AI">Lookup with AI</button>
+          </div>
+          <div id="f-suggest" class="compact-note"></div>
+        </div>
+
+        <!-- TWO COLUMNS OF MACROS:
+             Left macro block (under Date/Time): Calories + Protein
+             Right macro block (under Item): Carbs + Fat -->
+        <div class="microgrid-2" style="grid-column: 1 / span 2">
+          <div>
+            <label>Calories</label>
+            <input id="f-cal" type="number" inputmode="decimal">
+          </div>
+          <div>
+            <label>Protein (g)</label>
+            <input id="f-prot" type="number" step="0.1" inputmode="decimal">
+          </div>
+        </div>
+
+        <div class="microgrid-2" style="grid-column: 3 / span 2">
+          <div>
+            <label>Carbs (g)</label>
+            <input id="f-carb" type="number" step="0.1" inputmode="decimal">
+          </div>
+          <div>
+            <label>Fat (g)</label>
+            <input id="f-fat" type="number" step="0.1" inputmode="decimal">
+          </div>
+        </div>
+
+        <div style="grid-column: span 4">
+          <label>Notes</label>
+          <textarea id="f-notes" placeholder="Optional: brand, serving size, adjustments…"></textarea>
+        </div>
+
+        <!-- Meal plan helpers stay as a compact subpanel -->
+        <div class="panel" style="margin-top:6px; grid-column: span 4; padding:12px">
+          <div class="row" style="gap:8px; align-items:flex-end">
             <div style="flex:1">
               <label>From Meal Plan</label>
               <select id="f-mealpick">
@@ -617,18 +669,18 @@ function renderFood(){
             <button class="btn secondary" id="f-meal-apply">Apply to form</button>
             <button class="btn secondary" id="f-meal-add">Add as entry</button>
           </div>
-          <div class="small muted">Apply fills the fields. Add inserts a Food Log row for this meal.</div>
+          <div class="small muted" style="margin-top:6px">Apply fills the fields. Add inserts a Food Log row for this meal.</div>
         </div>
       </div>
-      <div class="row">
-        <button class="btn secondary" id="f-ai">Lookup macros with AI</button>
+
+      <div class="row" style="justify-content:flex-end; gap:8px; margin-top:8px">
         <button class="btn" id="f-add">Add</button>
       </div>
     </div>
 
     <div class="panel">
       <h3 class="small">Food Entries</h3>
-      <div class="row">
+      <div class="row" style="gap:8px">
         <label>Filter date</label>
         <input id="f-filter" type="date" value="${todayStr()}" style="max-width:200px">
         <button class="btn secondary" id="f-clear">All</button>
@@ -649,7 +701,9 @@ function renderFood(){
       mealSel.appendChild(opt);
     });
   }
-  function getMealById(id){ return (state.meals || []).find(m=> String(m.id) === String(id)); }
+  const getMealById = id => (state.meals || []).find(m=> String(m.id) === String(id));
+
+  // Meal plan: Apply / Add
   $('#f-meal-apply').onclick = ()=>{
     const chosen = getMealById($('#f-mealpick').value);
     if (!chosen) { toast('Pick a meal'); return; }
@@ -690,11 +744,17 @@ function renderFood(){
     renderFood();
   };
 
-  $('#f-ai').onclick = async ()=>{
+  // AI lookup (inline, tight to Item)
+  const doAILookup = async ()=>{
     try{
-      const desc=$('#f-item').value.trim(); if(!desc){ toast('Enter a food description'); return; }
-      const r=await lookupMacrosWithAI(desc);
-      $('#f-cal').value=r.calories||''; $('#f-prot').value=r.protein||''; $('#f-carb').value=r.carbs||''; $('#f-fat').value=r.fat||'';
+      const desc = $('#f-item').value.trim();
+      if(!desc){ toast('Enter a food description'); return; }
+      const r = await lookupMacrosWithAI(desc);
+      $('#f-cal').value  = r.calories ?? '';
+      $('#f-prot').value = r.protein  ?? '';
+      $('#f-carb').value = r.carbs    ?? '';
+      $('#f-fat').value  = r.fat      ?? '';
+      // seed library too
       if (SHEETS_ENDPOINT) {
         api('foodlib.upsert', {
           row: { name: desc, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, source:'ai' }
@@ -702,7 +762,9 @@ function renderFood(){
       }
     }catch(e){ toast(e.message); }
   };
+  $('#f-ai-inline').onclick = doAILookup;
 
+  // Add row
   $('#f-add').onclick = async ()=>{
     const row = {
       id: uid(),
@@ -710,10 +772,10 @@ function renderFood(){
       time: $('#f-time').value || '00:00',
       item: $('#f-item').value.trim() || 'Food',
       calories: toNum($('#f-cal').value,0),
-      protein: toNum($('#f-prot').value,0),
-      carbs: toNum($('#f-carb').value,0),
-      fat: toNum($('#f-fat').value,0),
-      notes: $('#f-notes').value.trim()
+      protein:  toNum($('#f-prot').value,0),
+      carbs:    toNum($('#f-carb').value,0),
+      fat:      toNum($('#f-fat').value,0),
+      notes:    $('#f-notes').value.trim()
     };
     state.foods.push(row); saveState();
     if (SHEETS_ENDPOINT) {
@@ -728,16 +790,8 @@ function renderFood(){
     renderFood();
   };
 
-  $('#f-clear').onclick = ()=>{ $('#f-filter').value=''; renderFoodTable(); };
-  $('#f-sync').onclick = async ()=>{
-    const ff = $('#f-filter'); if (ff) ff.value = ''; // clear filter so you see results
-    await trySync({ refresh:true });
-  };
-  $('#f-filter').onchange = renderFoodTable;
-  renderFoodTable();
-
-  // typeahead
-  const fItem = document.getElementById('f-item');
+  // Suggestions (Food Library) — stays under Item, compact
+  const fItem = $('#f-item');
   let suggestTimer = 0;
   fItem.addEventListener('input', ()=>{
     clearTimeout(suggestTimer);
@@ -750,8 +804,14 @@ function renderFood(){
       } catch {
         renderFoodSuggestions([]);
       }
-    }, 180);
+    }, 160);
   });
+
+  // Table controls
+  $('#f-clear').onclick = ()=>{ $('#f-filter').value=''; renderFoodTable(); };
+  $('#f-sync').onclick  = async ()=>{ const ff=$('#f-filter'); if(ff) ff.value=''; await trySync({ refresh:true }); };
+  $('#f-filter').onchange = renderFoodTable;
+  renderFoodTable();
 }
 
 function renderFoodTable(){
