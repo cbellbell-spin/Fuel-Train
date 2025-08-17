@@ -342,22 +342,32 @@ async function trySync(opts={ refresh:true }) {
       state.meals = payload.meals.slice();
     }
 
-    // Daily Summary -> map to overrides
+    // --- DAILY SUMMARY: array + map mirror ---
     if (Array.isArray(payload.daily)) {
-      const map = {};
-      payload.daily.forEach(r=>{
-        const d = dateKey(r.date);
-        const v = toNum(r.activeKcalsOverride, NaN);
-        if (!isNaN(v)) {
-          map[d] = {
-            activeKcalsOverride: v,
-            source: r.source || 'server',
-            updatedAt: r.updatedAt || new Date().toISOString()
-          };
-        }
-      });
-      state.dailyOverrides = map;
+    // Source of truth: array of rows
+     state.daily = payload.daily.map(r => ({
+    ...r,
+    date: dateKey(r.date)  // normalize to 'YYYY-MM-DD'
+  }));
+
+  // Back-compat mirror: map by date
+  const map = {};
+  state.daily.forEach(r => {
+    const v = toNum(r.activeKcalsOverride, NaN);
+    if (Number.isFinite(v)) {
+      map[r.date] = {
+        activeKcalsOverride: v,
+        source: r.source || 'server',
+        updatedAt: r.updatedAt || new Date().toISOString()
+      };
     }
+  });
+  state.dailyOverrides = map;
+} else {
+  if (!Array.isArray(state.daily)) state.daily = [];
+  state.dailyOverrides = state.dailyOverrides || {};
+}
+
 
     state.lastSync = new Date().toISOString();
     saveState();
@@ -410,10 +420,10 @@ function correctedActiveCalories(e){
 
 // Prefer daily override when present
 function getActiveForDate(dateStr){
-  const o = state.dailyOverrides && state.dailyOverrides[dateStr];
-  if (o && Number.isFinite(+o.activeKcalsOverride)) return +o.activeKcalsOverride;
-  const exs = state.exercises.filter(e=> e.date===dateStr);
-  return exs.reduce((a,b)=> a+correctedActiveCalories(b),0);
+  const o = getActiveOverride(dateStr);
+  if (Number.isFinite(o)) return o;       // honor manual override
+  const exs = state.exercises.filter(e => dateKey(e.date) === dateStr);
+  return exs.reduce((a,b)=> a + correctedActiveCalories(b), 0);
 }
 
 function calcTotals(dateStr){
@@ -796,23 +806,50 @@ function renderFoodTable(){
 }
 function getActiveOverride(dateStr) {
   const d = dateKey(dateStr || todayStr());
-  const row = (state.daily || []).find(r => dateKey(r.date) === d);
-  const v = row ? toNum(row.activeKcalsOverride, NaN) : NaN;
-  return Number.isFinite(v) ? v : null;  // null = no override
-}
-function saveActiveOverride(dateStr, value) {
-  const d = dateKey(dateStr || todayStr());
-  const row = (state.daily || []).find(r => dateKey(r.date) === d);
 
-  if (row) {
-    row.activeKcalsOverride = value;
-  } else {
-    (state.daily = state.daily || []).push({
-      date: d,
-      activeKcalsOverride: value
-    });
+  // Prefer the array (source of truth)
+  if (Array.isArray(state.daily)) {
+    const row = state.daily.find(r => dateKey(r.date) === d);
+    const v = row ? toNum(row.activeKcalsOverride, NaN) : NaN;
+    if (Number.isFinite(v)) return v;
   }
-  persistState();  // make sure it survives reload
+
+  // Fallback: legacy map
+  const m = state.dailyOverrides && state.dailyOverrides[d];
+  if (m && Number.isFinite(+m.activeKcalsOverride)) return +m.activeKcalsOverride;
+
+  return null;
+}
+async function saveActiveOverride(dateStr, value) {
+  const d = dateKey(dateStr || todayStr());
+  const row = {
+    id: `ds_${d}`,
+    date: d,
+    activeKcalsOverride: toNum(value, 0),
+    source: 'manual',
+    updatedAt: new Date().toISOString()
+  };
+
+  // Update array
+  if (!Array.isArray(state.daily)) state.daily = [];
+  const i = state.daily.findIndex(r => dateKey(r.date) === d);
+  if (i >= 0) state.daily[i] = Object.assign({}, state.daily[i], row);
+  else state.daily.push(row);
+
+  // Mirror map
+  state.dailyOverrides = state.dailyOverrides || {};
+  state.dailyOverrides[d] = {
+    activeKcalsOverride: row.activeKcalsOverride,
+    source: row.source,
+    updatedAt: row.updatedAt
+  };
+
+  saveState();
+
+  if (SHEETS_ENDPOINT) {
+    try { await api('upsert', { sheet: 'Daily Summary', row }); }
+    catch (e) { console.warn('upsert Daily Summary failed', e); }
+  }
 }
 function renderExercise(){
   const el=$('#view-ex');
@@ -925,11 +962,11 @@ function renderExerciseTable(){
 
   // ---- override badge (uses the filter date or today) ----
   const queryDate = dateShown || todayStr();
-  const oVal = getActiveOverride(queryDate);     // number or null
-  const hasOverride = Number.isFinite(oVal);     // <- handles 0 correctly
+  const oVal = getActiveOverride(queryDate);        // number or null
+  const hasOverride = Number.isFinite(oVal);        // 0 is valid
 
   const overrideBadge = hasOverride
-    ? `<span class="pill" title="Override in effect for ${queryDate}">
+    ? `<span class="pill" title="Override in effect for ${queryDate}" style="margin-left:8px">
          Override: ${fmt1(oVal)} kcal
        </span>`
     : '';
