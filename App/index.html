@@ -83,7 +83,39 @@
   .inline-row { flex-wrap:wrap; }
   .inline-row .button-quiet { height:auto; }
 }
+/* Force the Log Food "Lookup with AI" button under the input on mobile */
+@media (max-width: 720px) {
+  /* Make the inline row wrap and give the text input a full line */
+  .inline-row { flex-wrap: wrap; }
+
+  /* The .grow input inside the inline row becomes full width */
+  .inline-row .grow {
+    flex: 1 1 100%;
+    min-width: 0;       /* prevent overflow */
+  }
+
+  /* Make the AI button sit on its own line and be easy to tap */
+  #f-ai-inline {
+    width: 100%;
+    margin-top: 6px;
+  }
+}
+  
 .compact-note { margin-top:6px; color:var(--muted); font-size:12px; }
+/* Subtle desktop lift for the inline AI button */
+#f-ai-inline {
+  border: 1px solid #2b3850;
+  transition: transform 0.06s ease, box-shadow 0.06s ease, border-color 0.06s ease;
+}
+#f-ai-inline:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+  border-color: #3a4c72;
+}
+#f-ai-inline:active {
+  transform: translateY(0);
+  box-shadow: none;
+}
 
 </style>
 </head>
