@@ -856,7 +856,7 @@ function renderFood(){
           <div id="f-suggest" class="compact-note"></div>
         </div>
 
-        <!-- Macros: one compact row (desktop 4-up; responsive in CSS) -->
+        <!-- Macros row -->
         <div class="macro-row" style="grid-column: span 4">
           <div>
             <label>Calories</label>
@@ -882,7 +882,7 @@ function renderFood(){
           <textarea id="f-notes" placeholder="Optional: brand, serving size, adjustments…"></textarea>
         </div>
 
-        <!-- Meal plan helpers (compact subpanel) -->
+        <!-- Meal plan helpers -->
         <div class="panel" style="margin-top:6px; grid-column: span 4; padding:12px">
           <div class="row" style="gap:8px; align-items:flex-end">
             <div style="flex:1">
@@ -915,7 +915,7 @@ function renderFood(){
     </div>
   `;
 
-  // meal plan picker options
+  // ------- meal plan picker options -------
   const mealSel = $('#f-mealpick');
   if (mealSel) {
     const meals = (state.meals || []).slice().sort((a,b)=> (a.name||'').localeCompare(b.name||''));
@@ -928,9 +928,37 @@ function renderFood(){
   }
   const getMealById = id => (state.meals || []).find(m=> String(m.id) === String(id));
 
-  // Meal plan: Apply / Add
-  $('#f-meal-apply').onclick = ()=>{
-    const chosen = getMealById($('#f-mealpick').value);
+  // ------- AI lookup helper -------
+  const doAILookup = async ()=>{
+    try{
+      const itemInput = $('#f-item');
+      const desc = itemInput ? itemInput.value.trim() : '';
+      if(!desc){ toast('Enter a food description'); return; }
+      const r = await lookupMacrosWithAI(desc);
+      const cal  = $('#f-cal');  if (cal)  cal.value  = r.calories ?? '';
+      const prot = $('#f-prot'); if (prot) prot.value = r.protein  ?? '';
+      const carb = $('#f-carb'); if (carb) carb.value = r.carbs    ?? '';
+      const fat  = $('#f-fat');  if (fat)  fat.value  = r.fat      ?? '';
+      if (SHEETS_ENDPOINT) {
+        api('foodlib.upsert', { row: { name: desc, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, source:'ai' } }).catch(()=>{});
+      }
+    }catch(e){ toast(e.message); }
+  };
+
+  // ------- null-safe button hookups -------
+  const aiBtn      = $('#f-ai-inline');
+  const addBtn     = $('#f-add');
+  const mealApply  = $('#f-meal-apply');
+  const mealAdd    = $('#f-meal-add');
+  const clearBtn   = $('#f-clear');
+  const syncBtn    = $('#f-sync');
+  const filterEl   = $('#f-filter');
+  const dateEl     = $('#f-date');
+
+  if (aiBtn) aiBtn.onclick = doAILookup;
+
+  if (mealApply) mealApply.onclick = ()=>{
+    const chosen = getMealById($('#f-mealpick')?.value);
     if (!chosen) { toast('Pick a meal'); return; }
     $('#f-item').value = chosen.name || 'Meal';
     $('#f-cal').value  = toNum(chosen.calories,0);
@@ -940,13 +968,14 @@ function renderFood(){
     const notesEl = $('#f-notes');
     if (notesEl && chosen.items && !notesEl.value) notesEl.value = chosen.items;
   };
-  $('#f-meal-add').onclick = async ()=>{
-    const chosen = getMealById($('#f-mealpick').value);
+
+  if (mealAdd) mealAdd.onclick = async ()=>{
+    const chosen = getMealById($('#f-mealpick')?.value);
     if (!chosen) { toast('Pick a meal'); return; }
     const row = {
       id: uid(),
-      date: $('#f-date').value || todayStr(),
-      time: $('#f-time').value || '00:00',
+      date: (dateEl && dateEl.value) || getWorkingDate(),
+      time: $('#f-time')?.value || '00:00',
       item: chosen.name || 'Meal',
       calories: toNum(chosen.calories,0),
       protein: toNum(chosen.protein,0),
@@ -957,72 +986,28 @@ function renderFood(){
     state.foods.push(row); saveState();
     if (SHEETS_ENDPOINT) {
       pushRow('Food Log', row);
-      api('foodlib.upsert', {
-        row: {
-          name: row.item,
-          serving_desc: row.notes || '',
-          calories: row.calories, protein: row.protein, carbs: row.carbs, fat: row.fat,
-          source: 'meal_plan'
-        }
-      }).catch(()=>{});
+      api('foodlib.upsert', { row: {
+        name: row.item,
+        serving_desc: row.notes || '',
+        calories: row.calories, protein: row.protein, carbs: row.carbs, fat: row.fat,
+        source: 'meal_plan'
+      }}).catch(()=>{});
     }
     renderFood();
   };
 
-  // AI lookup (inline)
-  const doAILookup = async ()=>{
-    try{
-      const desc = $('#f-item').value.trim();
-      if(!desc){ toast('Enter a food description'); return; }
-      const r = await lookupMacrosWithAI(desc);
-      $('#f-cal').value  = r.calories ?? '';
-      $('#f-prot').value = r.protein  ?? '';
-      $('#f-carb').value = r.carbs    ?? '';
-      $('#f-fat').value  = r.fat      ?? '';
-      if (SHEETS_ENDPOINT) {
-        api('foodlib.upsert', {
-          row: { name: desc, calories:r.calories, protein:r.protein, carbs:r.carbs, fat:r.fat, source:'ai' }
-        }).catch(()=>{});
-      }
-    }catch(e){ toast(e.message); }
-  };
-  $('#f-ai-inline').onclick = doAILookup;
-
-  // Add row
-  $('#f-add').onclick = async () => {
-  const row = {
-    id: uid(),
-    date: $('#f-date').value || getWorkingDate(),
-    time: $('#f-time').value || '00:00',
-    item: $('#f-item').value.trim() || 'Food',
-    calories: toNum($('#f-cal').value, 0),
-    protein:  toNum($('#f-prot').value, 0),
-    carbs:    toNum($('#f-carb').value, 0),
-    fat:      toNum($('#f-fat').value, 0),
-    notes:    $('#f-notes').value.trim()
-  };
-
-  state.foods.push(row);
-  saveState();
-
-  if (SHEETS_ENDPOINT) {
-    pushRow('Food Log', row);
-    api('foodlib.upsert', {
-      row: {
-        name: row.item,
-        serving_desc: row.notes || '',
-        calories: row.calories,
-        protein: row.protein,
-        carbs: row.carbs,
-        fat: row.fat,
-        source: 'food_log'
-      }
-    }).catch(() => {});
-  }
-
-  renderFood();
-};
-
+  if (addBtn) addBtn.onclick = async ()=>{
+    const row = {
+      id: uid(),
+      date: (dateEl && dateEl.value) || getWorkingDate(),
+      time: $('#f-time')?.value || '00:00',
+      item: $('#f-item')?.value.trim() || 'Food',
+      calories: toNum($('#f-cal')?.value,0),
+      protein:  toNum($('#f-prot')?.value,0),
+      carbs:    toNum($('#f-carb')?.value,0),
+      fat:      toNum($('#f-fat')?.value,0),
+      notes:    $('#f-notes')?.value.trim() || ''
+    };
     state.foods.push(row); saveState();
     if (SHEETS_ENDPOINT) {
       pushRow('Food Log', row);
@@ -1036,132 +1021,35 @@ function renderFood(){
     renderFood();
   };
 
-// Suggestions (Food Library)
-const fItem = document.getElementById('f-item');
-if (fItem) {
+  // Filter + Sync + date sync to global
+  if (clearBtn) clearBtn.onclick = ()=> { if (filterEl) filterEl.value=''; renderFoodTable(); };
+  if (syncBtn)  syncBtn.onclick  = async ()=> { if (filterEl) filterEl.value=''; await trySync({ refresh:true }); };
+  if (filterEl) filterEl.onchange = ()=> { setWorkingDate(filterEl.value); renderFoodTable(); };
+  if (dateEl)   { dateEl.value = getWorkingDate(); dateEl.onchange = ()=> { setWorkingDate(dateEl.value); }; }
+
+  // ------- Food Library suggestions (guarded) -------
+  const fItem = $('#f-item');
   let suggestTimer = 0;
-  fItem.addEventListener('input', () => {
-    clearTimeout(suggestTimer);
-    const q = fItem.value.trim();
-    if (q.length < 2) { renderFoodSuggestions([]); return; }
-    suggestTimer = setTimeout(async () => {
-      try {
-        const hits = await findFoodLibrary(q, 8);
-        renderFoodSuggestions(hits);
-      } catch {
-        renderFoodSuggestions([]);
-      }
-    }, 160);
-  });
-} else {
-  // If we ever get here, the markup didn't render as expected
-  console.debug('[renderFood] #f-item not found; skipping suggestions hookup');
-}
-
-  // Table controls
-  $('#f-clear').onclick = ()=>{ $('#f-filter').value=''; renderFoodTable(); };
-  $('#f-sync').onclick  = async ()=>{ const ff=$('#f-filter'); if(ff) ff.value=''; await trySync({ refresh:true }); };
-  $('#f-filter').onchange = renderFoodTable;
-  renderFoodTable();
-
-
-function renderFoodTable(){
-  const container=$('#f-table'); const filter=$('#f-filter').value;
-  const rows = state.foods.filter(r=> !filter || dateKey(r.date) === filter);
-  const total=rows.reduce((a,b)=>{a.cal+=toNum(b.calories);a.p+=toNum(b.protein);a.c+=toNum(b.carbs);a.f+=toNum(b.fat);return a;},{cal:0,p:0,c:0,f:0});
-  container.innerHTML = `
-    <div class="row">
-      <div class="pill">Entries: ${rows.length}</div>
-      <div class="pill">Calories: ${fmt1(total.cal)}</div>
-      <div class="pill">Protein: ${fmt1(total.p)}g</div>
-      <div class="pill">Carbs: ${fmt1(total.c)}g</div>
-      <div class="pill">Fat: ${fmt1(total.f)}g</div>
-    </div>
-    <table>
-      <thead><tr><th>Date</th><th>Time</th><th>Item</th><th>Cal</th><th>P</th><th>C</th><th>F</th><th>Notes</th><th></th></tr></thead>
-      <tbody>
-        ${rows.map(r=>`
-          <tr>
-            ${['date','time','item','calories','protein','carbs','fat','notes'].map(k=>{
-              let val = r[k] ?? '';
-              if (k === 'date') val = showDate(val);
-              if (k === 'time') val = showTime(val);
-              return `<td contenteditable class="inline-edit" data-id="${r.id}" data-field="${k}">${val}</td>`;
-            }).join('')}
-            <td><button class="btn danger small" data-del="${r.id}">Del</button></td>
-          </tr>`).join('')}
-      </tbody>
-    </table>
-    <div class="small muted">Edit cells to update. Saves on blur. Deletes sync to Sheets if configured.</div>
-  `;
-  $$('#f-table [contenteditable]').forEach(cell=>{
-    cell.addEventListener('blur', ()=>{
-      const id=cell.dataset.id, field=cell.dataset.field;
-      const row=state.foods.find(x=> x.id===id); if(!row) return;
-      const raw = cell.textContent.trim();
-      if (field === 'date') row.date = dateKey(raw);
-      else if (field === 'time') row.time = timeKey(raw);
-      else if (['calories','protein','carbs','fat'].includes(field)) row[field] = toNum(raw,0);
-      else row[field] = raw;
-      saveState(); if(SHEETS_ENDPOINT) pushRow('Food Log', row); renderFoodTable();
+  if (fItem) {
+    fItem.addEventListener('input', () => {
+      clearTimeout(suggestTimer);
+      const q = fItem.value.trim();
+      if (q.length < 2) { renderFoodSuggestions([]); return; }
+      suggestTimer = setTimeout(async () => {
+        try {
+          const hits = await findFoodLibrary(q, 8);
+          renderFoodSuggestions(hits);
+        } catch {
+          renderFoodSuggestions([]);
+        }
+      }, 160);
     });
-  });
-  $$('#f-table [data-del]').forEach(btn=>{
-    btn.onclick = ()=>{
-      const id=btn.getAttribute('data-del');
-      state.foods = state.foods.filter(x=> x.id!==id); saveState();
-      if(SHEETS_ENDPOINT) deleteRow('Food Log', id);
-      renderFoodTable();
-    };
-  });
-}
-function getActiveOverride(dateStr) {
-  const d = dateKey(dateStr || todayStr());
-
-  // Prefer the array (source of truth)
-  if (Array.isArray(state.daily)) {
-    const row = state.daily.find(r => dateKey(r.date) === d);
-    const v = row ? toNum(row.activeKcalsOverride, NaN) : NaN;
-    if (Number.isFinite(v)) return v;
   }
 
-  // Fallback: legacy map
-  const m = state.dailyOverrides && state.dailyOverrides[d];
-  if (m && Number.isFinite(+m.activeKcalsOverride)) return +m.activeKcalsOverride;
-
-  return null;
+  // finally, render table
+  renderFoodTable();
 }
-async function saveActiveOverride(dateStr, value) {
-  const d = dateKey(dateStr || todayStr());
-  const row = {
-    id: `ds_${d}`,
-    date: d,
-    activeKcalsOverride: toNum(value, 0),
-    source: 'manual',
-    updatedAt: new Date().toISOString()
-  };
 
-  // Update array
-  if (!Array.isArray(state.daily)) state.daily = [];
-  const i = state.daily.findIndex(r => dateKey(r.date) === d);
-  if (i >= 0) state.daily[i] = Object.assign({}, state.daily[i], row);
-  else state.daily.push(row);
-
-  // Mirror map
-  state.dailyOverrides = state.dailyOverrides || {};
-  state.dailyOverrides[d] = {
-    activeKcalsOverride: row.activeKcalsOverride,
-    source: row.source,
-    updatedAt: row.updatedAt
-  };
-
-  saveState();
-
-  if (SHEETS_ENDPOINT) {
-    try { await api('upsert', { sheet: 'Daily Summary', row }); }
-    catch (e) { console.warn('upsert Daily Summary failed', e); }
-  }
-}
 function renderExercise(){
   const el=$('#view-ex');
   el.innerHTML = `
