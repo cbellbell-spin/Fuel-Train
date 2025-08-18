@@ -1062,7 +1062,7 @@ fItem.addEventListener('input', ()=>{
   $('#f-sync').onclick  = async ()=>{ const ff=$('#f-filter'); if(ff) ff.value=''; await trySync({ refresh:true }); };
   $('#f-filter').onchange = renderFoodTable;
   renderFoodTable();
-}
+
 
 function renderFoodTable(){
   const container=$('#f-table'); const filter=$('#f-filter').value;
