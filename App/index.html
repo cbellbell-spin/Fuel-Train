@@ -181,6 +181,12 @@
 @media (max-width: 520px){
   .macro-row{ grid-template-columns: 1fr; }
 }
+#ui-date-wrap{ margin-left:auto; display:flex; align-items:center; gap:8px }
+#ui-date{ background:#0b1220; color:var(--text); border:1px solid #1e293b; border-radius:10px; padding:8px 10px; }
+#ui-date-wrap .small { color: var(--muted); font-size: 12px; }
+@media (max-width:720px){
+  #ui-date-wrap{ width:100%; margin-left:0; justify-content:flex-start; }
+}
 
 </style>
 </head>
@@ -222,6 +228,24 @@ function dateKey(v){
     const d = new Date(v.getTime() - v.getTimezoneOffset()*60000);
     return d.toISOString().slice(0,10);
   }
+  function getWorkingDate(){
+  return state.uiDate || todayStr();
+}
+
+function setWorkingDate(d){
+  state.uiDate = dateKey(d || todayStr());
+  saveState();
+
+  // If a view has a local filter field, keep it in sync with the global date.
+  const foodFilter = $('#f-filter'); if (foodFilter) foodFilter.value = state.uiDate;
+  const exFilter   = $('#e-filter'); if (exFilter)   exFilter.value   = state.uiDate;
+
+  // If a per-view date input represents "the day" (not a filter),
+  // initialize from global so users don't feel drift:
+  const dsDate = $('#ds-date'); if (dsDate) dsDate.value = state.uiDate;
+  const fDate  = $('#f-date');  if (fDate)  fDate.value  = state.uiDate;
+}
+
   const s = String(v||'').trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
   const d2 = new Date(s);
@@ -342,6 +366,8 @@ function renderFoodSuggestions(list){
 
 /* ---------- state ---------- */
 const defaultState = {
+  // Single source of truth for "the working day"
+  uiDate: todayStr(),
   foods: [], exercises: [], meals: [],
   // Map of overrides keyed by 'YYYY-MM-DD' -> { activeKcalsOverride, source, updatedAt }
   dailyOverrides: {},
@@ -366,6 +392,7 @@ function loadState(){
   }catch{ return JSON.parse(JSON.stringify(defaultState)); }
 }
 let state = loadState();
+setWorkingDate(state.uiDate || todayStr());
 SHEETS_ENDPOINT = state.settings.sheetsEndpoint || '';
 OPENAI_KEY = state.settings.openaiKey || '';
 OPENAI_MODEL = state.settings.openaiModel || 'gpt-4o-mini';
@@ -382,15 +409,48 @@ const tabs = [
   {id:'suggest',   label:'Suggestions'}
 ];
 function renderTabs(active='dashboard'){
-  const nav = $('#tabs'); nav.innerHTML='';
+  const nav = $('#tabs');
+  nav.innerHTML = '';
+
+  // Left: tabs
+  const left = document.createElement('div');
+  left.style.display = 'flex';
+  left.style.gap = '8px';
+  left.style.flexWrap = 'wrap';
+
   tabs.forEach(t=>{
     const b=document.createElement('button');
     b.textContent=t.label;
     b.className = t.id===active? 'active':'';
     b.onclick=()=>switchView(t.id);
-    nav.appendChild(b);
+    left.appendChild(b);
   });
+
+  // Right: global date
+  let right = document.getElementById('ui-date-wrap');
+  if (!right) {
+    right = document.createElement('div');
+    right.id = 'ui-date-wrap';
+    // we append this after building (below) so it sits to the right
+  }
+  right.innerHTML = `
+    <span class="small">Date</span>
+    <input id="ui-date" type="date" value="${state.uiDate || todayStr()}">
+  `;
+
+  // Put both in the nav container
+  nav.appendChild(left);
+  nav.appendChild(right);
+
+  // Wire: when global date changes, save and re-render current view
+  const ui = $('#ui-date');
+  ui.onchange = ()=>{
+    const d = dateKey(ui.value || todayStr());
+    setWorkingDate(d);           // updates state + syncs local filters
+    rerender();
+  };
 }
+
 function switchView(id){
   $$('.view').forEach(v=> v.style.display='none');
   $(`#view-${id}`).style.display='';
@@ -666,7 +726,7 @@ function macroPlan(){
 
 /* ---------- views ---------- */
 function renderDashboard(){
-  const el=$('#view-dashboard'); const d=todayStr(); const totals=calcTotals(d);
+  const el=$('#view-dashboard'); const d=getWorkingDate(); const totals=calcTotals(d);
   const overrideToday = Array.isArray(state.daily)
   && state.daily.some(r => String(r.date) === d && Number.isFinite(+r.activeKcalsOverride));
   const tdee = toNum(state.settings.ree,1950)+totals.active;
@@ -711,6 +771,29 @@ function renderDashboard(){
       </div>
     </div>
   `;
+  // ---- keep the Food form + table in sync with the global working date ----
+const fDate = $('#f-date');
+if (fDate) {
+  // initialize from global
+  fDate.value = getWorkingDate();
+  // push changes to global when user edits the form date
+  fDate.onchange = () => { setWorkingDate(fDate.value); rerender(); };
+}
+
+const fFilter = $('#f-filter');
+if (fFilter) {
+  // initialize table filter from global
+  fFilter.value = getWorkingDate();
+  // when filter changes, make it the global working date too
+  fFilter.onchange = () => { setWorkingDate(fFilter.value); renderFoodTable(); };
+}
+
+// "All" button clears the table filter (doesn't touch the global date)
+const fClear = $('#f-clear');
+if (fClear) {
+  fClear.onclick = () => { $('#f-filter').value = ''; renderFoodTable(); };
+}
+
   $('#qa-ai').onclick = async ()=>{
     try{
       const desc=$('#qa-food').value.trim(); if(!desc){ toast('Enter a food description'); return; }
@@ -736,7 +819,7 @@ function renderFood(){
         <div class="microgrid-2" style="grid-column: 1 / span 2">
           <div>
             <label>Date</label>
-            <input id="f-date" type="date" value="${todayStr()}">
+            <input id="f-date" type="date" value="${getWorkingDate()}">
           </div>
           <div>
             <label>Time</label>
@@ -805,7 +888,7 @@ function renderFood(){
       <h3 class="small">Food Entries</h3>
       <div class="row" style="gap:8px">
         <label>Filter date</label>
-        <input id="f-filter" type="date" value="${todayStr()}" style="max-width:200px">
+        <input id="f-filter" type="date" value="${getWorkingDate()}" style="max-width:200px">
         <button class="btn secondary" id="f-clear">All</button>
         <button class="btn secondary" id="f-sync">Sync from Sheets</button>
       </div>
@@ -887,18 +970,40 @@ function renderFood(){
   $('#f-ai-inline').onclick = doAILookup;
 
   // Add row
-  $('#f-add').onclick = async ()=>{
-    const row = {
-      id: uid(),
-      date: $('#f-date').value || todayStr(),
-      time: $('#f-time').value || '00:00',
-      item: $('#f-item').value.trim() || 'Food',
-      calories: toNum($('#f-cal').value,0),
-      protein:  toNum($('#f-prot').value,0),
-      carbs:    toNum($('#f-carb').value,0),
-      fat:      toNum($('#f-fat').value,0),
-      notes:    $('#f-notes').value.trim()
-    };
+  $('#f-add').onclick = async () => {
+  const row = {
+    id: uid(),
+    date: $('#f-date').value || getWorkingDate(),
+    time: $('#f-time').value || '00:00',
+    item: $('#f-item').value.trim() || 'Food',
+    calories: toNum($('#f-cal').value, 0),
+    protein:  toNum($('#f-prot').value, 0),
+    carbs:    toNum($('#f-carb').value, 0),
+    fat:      toNum($('#f-fat').value, 0),
+    notes:    $('#f-notes').value.trim()
+  };
+
+  state.foods.push(row);
+  saveState();
+
+  if (SHEETS_ENDPOINT) {
+    pushRow('Food Log', row);
+    api('foodlib.upsert', {
+      row: {
+        name: row.item,
+        serving_desc: row.notes || '',
+        calories: row.calories,
+        protein: row.protein,
+        carbs: row.carbs,
+        fat: row.fat,
+        source: 'food_log'
+      }
+    }).catch(() => {});
+  }
+
+  renderFood();
+};
+
     state.foods.push(row); saveState();
     if (SHEETS_ENDPOINT) {
       pushRow('Food Log', row);
@@ -1143,7 +1248,7 @@ function renderExerciseTable(){
   const totalActive = rows.reduce((a,b)=> a + correctedActiveCalories(b), 0);
 
   // ---- override badge (uses the filter date or today) ----
-  const queryDate = dateShown || todayStr();
+  const queryDate = dateShown || getWorkingDate();
   const oVal = getActiveOverride(queryDate);        // number or null
   const hasOverride = Number.isFinite(oVal);        // 0 is valid
 
