@@ -23,6 +23,20 @@
   #tabs{ display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
   #tabs .tabs-left{ display:flex; gap:8px; flex-wrap:wrap; }
   #tabs .tabs-right input{ width:auto; min-width: 160px; }
+  #tabs .tabs-right { display:flex; align-items:center; gap:6px; }
+ .date-nav{
+  background:var(--soft);
+  border:1px solid #253045;
+  border-radius:8px;
+  padding:6px 10px;
+  cursor:pointer;
+  color:var(--text);
+  line-height:1;
+}
+.date-nav:focus { outline:2px solid rgba(96,165,250,.35); }
+#ui-date{
+  padding-right:34px; /* room if your UA shows a calendar icon */
+}
 
   main{padding:16px}
   .panel{background:var(--panel);border:1px solid #1f2937;border-radius:14px;padding:16px;margin-bottom:16px}
@@ -261,6 +275,18 @@ function dateKey(v){
   }
   return todayStr();
 }
+function shiftWorkingDate(deltaDays){
+  const d = new Date(getWorkingDate());
+  d.setDate(d.getDate() + deltaDays);
+  setWorkingDate(dateKey(d));
+  rerender();
+}
+window.addEventListener('keydown', (e)=>{
+  if (e.target && ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
+  if (e.key === '[') shiftWorkingDate(-1);
+  if (e.key === ']') shiftWorkingDate(+1);
+  if (e.key.toLowerCase() === 't') { setWorkingDate(todayStr()); rerender(); }
+});
 
 /* --- Global working date (shared across screens) --- */
 function getWorkingDate(){
@@ -455,22 +481,19 @@ function renderTabs(active = 'dashboard'){
   });
 
   // global date picker (kept in sync with state)
-  right.innerHTML = `
-    <span class="small" style="margin-right:6px">Date</span>
-    <input id="ui-date" type="date" value="${getWorkingDate()}">
-  `;
+ right.innerHTML = `
+  <button class="date-nav" id="ui-prev" title="Previous day [">‹</button>
+  <input id="ui-date" type="date" value="${getWorkingDate()}" title="Change working date">
+  <button class="date-nav" id="ui-next" title="Next day ]">›</button>
+`;
+const ui = $('#ui-date');
+const prev = $('#ui-prev');
+const next = $('#ui-next');
 
-  nav.appendChild(left);
-  nav.appendChild(right);
+ui.onchange = () => { setWorkingDate(ui.value); rerender(); };
+prev.onclick = () => { shiftWorkingDate(-1); };
+next.onclick = () => { shiftWorkingDate(+1); };
 
-  // wire the date picker
-  const ui = document.getElementById('ui-date');
-  if (ui) {
-    ui.onchange = () => {
-      setWorkingDate(ui.value);
-      rerender();                   // re-render current view (and nav)
-    };
-  }
 }
 
 
