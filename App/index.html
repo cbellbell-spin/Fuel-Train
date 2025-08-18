@@ -1037,25 +1037,26 @@ function renderFood(){
   };
 
 // Suggestions (Food Library)
-const fItem = $('#f-item');
-let suggestTimer = 0;
-fItem.addEventListener('input', ()=>{
-  clearTimeout(suggestTimer);
-  const q = fItem.value.trim();
-  if (q.length < 2) { 
-    renderFoodSuggestions([]); 
-    return; 
-  }
-  suggestTimer = setTimeout(async ()=>{
-    try {
-      const hits = await findFoodLibrary(q, 8);
-      renderFoodSuggestions(hits);
-    } catch {
-      renderFoodSuggestions([]);
-    }
-  }, 160);  
-});
-
+const fItem = document.getElementById('f-item');
+if (fItem) {
+  let suggestTimer = 0;
+  fItem.addEventListener('input', () => {
+    clearTimeout(suggestTimer);
+    const q = fItem.value.trim();
+    if (q.length < 2) { renderFoodSuggestions([]); return; }
+    suggestTimer = setTimeout(async () => {
+      try {
+        const hits = await findFoodLibrary(q, 8);
+        renderFoodSuggestions(hits);
+      } catch {
+        renderFoodSuggestions([]);
+      }
+    }, 160);
+  });
+} else {
+  // If we ever get here, the markup didn't render as expected
+  console.debug('[renderFood] #f-item not found; skipping suggestions hookup');
+}
 
   // Table controls
   $('#f-clear').onclick = ()=>{ $('#f-filter').value=''; renderFoodTable(); };
