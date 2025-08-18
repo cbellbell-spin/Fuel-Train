@@ -214,8 +214,27 @@ let SHEETS_ENDPOINT = '';
 let OPENAI_KEY = '';
 let OPENAI_MODEL = 'gpt-4o-mini';
 
+
 const $  = (s, r=document)=> r.querySelector(s);
 const $$ = (s, r=document)=> Array.from(r.querySelectorAll(s));
+
+  // --- global error banners so crashes are obvious ---
+window.addEventListener('error', (e) => {
+  const m = (e && e.message) ? e.message : String(e);
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;padding:8px 12px;background:#b91c1c;color:#fff;font:12px/1.4 ui-monospace,monospace';
+  el.textContent = 'JS Error: ' + m;
+  document.body.appendChild(el);
+  console.error('JS Error', e);
+});
+window.addEventListener('unhandledrejection', (e) => {
+  const m = (e && e.reason && (e.reason.message || e.reason)) || e;
+  const el = document.createElement('div');
+  el.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;padding:8px 12px;background:#92400e;color:#fff;font:12px/1.4 ui-monospace,monospace';
+  el.textContent = 'Unhandled Promise Rejection: ' + m;
+  document.body.appendChild(el);
+  console.error('Unhandled rejection', e);
+});
 
 /* ---------- date/time helpers ---------- */
 const todayStr = ()=>{
@@ -1017,22 +1036,26 @@ function renderFood(){
     renderFood();
   };
 
-  // Suggestions (Food Library)
-  const fItem = $('#f-item');
-  let suggestTimer = 0;
-  fItem.addEventListener('input', ()=>{
-    clearTimeout(suggestTimer);
-    const q = fItem.value.trim();
-    if (q.length < 2) { renderFoodSuggestions([]); return; }
-    suggestTimer = setTimeout(async ()=>{
-      try {
-        const hits = await findFoodLibrary(q, 8);
-        renderFoodSuggestions(hits);
-      } catch {
-        renderFoodSuggestions([]);
-      }
-    }, 160);
-  });
+// Suggestions (Food Library)
+const fItem = $('#f-item');
+let suggestTimer = 0;
+fItem.addEventListener('input', ()=>{
+  clearTimeout(suggestTimer);
+  const q = fItem.value.trim();
+  if (q.length < 2) { 
+    renderFoodSuggestions([]); 
+    return; 
+  }
+  suggestTimer = setTimeout(async ()=>{
+    try {
+      const hits = await findFoodLibrary(q, 8);
+      renderFoodSuggestions(hits);
+    } catch {
+      renderFoodSuggestions([]);
+    }
+  }, 160);  
+});
+
 
   // Table controls
   $('#f-clear').onclick = ()=>{ $('#f-filter').value=''; renderFoodTable(); };
@@ -1594,8 +1617,12 @@ function renderSuggest(){
 }
 
 /* ---------- boot: render, then first-load sync ---------- */
-renderTabs();
-switchView('dashboard');
+try {
+  renderTabs();
+  switchView('dashboard');
+} catch (err) {
+  console.error('Boot failed:', err);
+}
 
 (async function firstLoadSync(){
   const key = 'ft-initial-sync:' + (SHEETS_ENDPOINT || 'none');
