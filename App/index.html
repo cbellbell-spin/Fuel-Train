@@ -235,7 +235,7 @@ window.addEventListener('unhandledrejection', (e) => {
 });
 
 /* ---------- date/time helpers ---------- */
-const todayStr = ()=>{
+const todayStr = () => {
   const d = new Date();
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
   return d.toISOString().slice(0,10);
@@ -246,8 +246,9 @@ function dateKey(v){
     const d = new Date(v.getTime() - v.getTimezoneOffset()*60000);
     return d.toISOString().slice(0,10);
   }
-  const s = String(v||'').trim();
+  const s = String(v || '').trim();
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
   const d2 = new Date(s);
   if (!isNaN(d2)) {
     d2.setMinutes(d2.getMinutes() - d2.getTimezoneOffset());
@@ -256,7 +257,7 @@ function dateKey(v){
   return todayStr();
 }
 
-// --- Global working date (shared across screens) ---
+/* --- Global working date (shared across screens) --- */
 function getWorkingDate(){
   return state.uiDate || todayStr();
 }
@@ -265,7 +266,7 @@ function setWorkingDate(d){
   state.uiDate = dateKey(d || todayStr());
   saveState();
 
-  // Keep any on-screen pickers in sync
+  // Keep any on-screen pickers/filters in sync
   const foodFilter = $('#f-filter'); if (foodFilter) foodFilter.value = state.uiDate;
   const exFilter   = $('#e-filter'); if (exFilter)   exFilter.value   = state.uiDate;
   const dsDate     = $('#ds-date');  if (dsDate)     dsDate.value     = state.uiDate;
