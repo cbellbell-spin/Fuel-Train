@@ -213,8 +213,6 @@ const APP_VERSION = '1.3.2';
 let SHEETS_ENDPOINT = '';
 let OPENAI_KEY = '';
 let OPENAI_MODEL = 'gpt-4o-mini';
-
-
 const $  = (s, r=document)=> r.querySelector(s);
 const $$ = (s, r=document)=> Array.from(r.querySelectorAll(s));
 
@@ -242,12 +240,24 @@ const todayStr = ()=>{
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
   return d.toISOString().slice(0,10);
 };
+
 function dateKey(v){
   if (v instanceof Date) {
     const d = new Date(v.getTime() - v.getTimezoneOffset()*60000);
     return d.toISOString().slice(0,10);
   }
-  function getWorkingDate(){
+  const s = String(v||'').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const d2 = new Date(s);
+  if (!isNaN(d2)) {
+    d2.setMinutes(d2.getMinutes() - d2.getTimezoneOffset());
+    return d2.toISOString().slice(0,10);
+  }
+  return todayStr();
+}
+
+// --- Global working date (shared across screens) ---
+function getWorkingDate(){
   return state.uiDate || todayStr();
 }
 
@@ -255,14 +265,11 @@ function setWorkingDate(d){
   state.uiDate = dateKey(d || todayStr());
   saveState();
 
-  // If a view has a local filter field, keep it in sync with the global date.
+  // Keep any on-screen pickers in sync
   const foodFilter = $('#f-filter'); if (foodFilter) foodFilter.value = state.uiDate;
   const exFilter   = $('#e-filter'); if (exFilter)   exFilter.value   = state.uiDate;
-
-  // If a per-view date input represents "the day" (not a filter),
-  // initialize from global so users don't feel drift:
-  const dsDate = $('#ds-date'); if (dsDate) dsDate.value = state.uiDate;
-  const fDate  = $('#f-date');  if (fDate)  fDate.value  = state.uiDate;
+  const dsDate     = $('#ds-date');  if (dsDate)     dsDate.value     = state.uiDate;
+  const fDate      = $('#f-date');   if (fDate)      fDate.value      = state.uiDate;
 }
 
   const s = String(v||'').trim();
@@ -412,6 +419,7 @@ function loadState(){
 }
 let state = loadState();
 setWorkingDate(state.uiDate || todayStr());
+if (!state.uiDate) state.uiDate = todayStr();
 SHEETS_ENDPOINT = state.settings.sheetsEndpoint || '';
 OPENAI_KEY = state.settings.openaiKey || '';
 OPENAI_MODEL = state.settings.openaiModel || 'gpt-4o-mini';
@@ -445,29 +453,28 @@ function renderTabs(active='dashboard'){
     left.appendChild(b);
   });
 
-  // Right: global date
-  let right = document.getElementById('ui-date-wrap');
-  if (!right) {
-    right = document.createElement('div');
-    right.id = 'ui-date-wrap';
-    // we append this after building (below) so it sits to the right
-  }
-  right.innerHTML = `
-    <span class="small">Date</span>
-    <input id="ui-date" type="date" value="${state.uiDate || todayStr()}">
-  `;
+// Right: global date
+let right = document.getElementById('ui-date-wrap');
+if (!right) {
+  right = document.createElement('div');
+  right.id = 'ui-date-wrap';
+}
 
-  // Put both in the nav container
-  nav.appendChild(left);
-  nav.appendChild(right);
+// render UI (always reflect the current working date)
+right.innerHTML = `
+  <span class="small">Date</span>
+  <input id="ui-date" type="date" value="${getWorkingDate()}">
+`;
 
-  // Wire: when global date changes, save and re-render current view
-  const ui = $('#ui-date');
-  ui.onchange = ()=>{
-    const d = dateKey(ui.value || todayStr());
-    setWorkingDate(d);           // updates state + syncs local filters
-    rerender();
-  };
+// append (if already in DOM, this moves it to the end so it sits right)
+nav.appendChild(right);
+
+// wire change -> update global + rerender current view
+const ui = right.querySelector('#ui-date');
+ui.onchange = () => {
+  setWorkingDate(ui.value);
+  rerender();
+};
 }
 
 function switchView(id){
@@ -1167,7 +1174,7 @@ function renderExercise(){
     <div class="panel">
       <h3 class="small">Daily Active Calories (Total)</h3>
       <div class="grid g4">
-        <div><label>Date</label><input id="ds-date" type="date" value="${todayStr()}"></div>
+        <div><label>Date</label><input id="ds-date" type="date" value="${getWorkingDate()}"></div>
         <div>
           <label>Total active kcals for day</label>
           <input id="ds-active" type="number" placeholder="e.g. 850">
@@ -1184,7 +1191,7 @@ function renderExercise(){
     <div class="panel">
       <h3 class="small">Add Exercise</h3>
       <div class="grid g4">
-        <div><label>Date</label><input id="e-date" type="date" value="${todayStr()}"></div>
+        <div><label>Date</label><input id="e-date" type="date" value="${getWorkingDate()}"></div>
         <div><label>Type</label>
           <select id="e-type">
             <option>Cycling - Road</option><option>Cycling - MTB</option><option>Cycling - Gravel</option>
@@ -1207,7 +1214,7 @@ function renderExercise(){
       <h3 class="small">Exercise Entries</h3>
       <div class="row">
         <label>Filter date</label>
-        <input id="e-filter" type="date" value="${todayStr()}" style="max-width:200px">
+        <input id="e-filter" type="date" value="${getWorkingDate()}" style="max-width:200px">
         <button class="btn secondary" id="e-clear">All</button>
         <button class="btn secondary" id="e-sync">Sync from Sheets</button>
       </div>
