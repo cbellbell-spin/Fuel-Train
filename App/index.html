@@ -273,15 +273,7 @@ function setWorkingDate(d){
   const fDate      = $('#f-date');   if (fDate)      fDate.value      = state.uiDate;
 }
 
-  const s = String(v||'').trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const d2 = new Date(s);
-  if (!isNaN(d2)) {
-    d2.setMinutes(d2.getMinutes() - d2.getTimezoneOffset());
-    return d2.toISOString().slice(0,10);
-  }
-  return todayStr();
-}
+
 function timeKey(v){
   if (v instanceof Date) {
     const h = String(v.getHours()).padStart(2,'0');
