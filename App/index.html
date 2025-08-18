@@ -633,6 +633,23 @@ function correctedActiveCalories(e){
   const met = {rest:1.2, low:4.0, moderate:7.0, high:10.0}[e.intensity||'moderate'];
   return met * toNum(state.settings.bodyWeightKg,80) * durH;
 }
+// Prefer daily override when present (number or null)
+function getActiveOverride(dateStr) {
+  const d = dateKey(dateStr || todayStr());
+
+  // Source of truth: state.daily (array of rows)
+  if (Array.isArray(state.daily)) {
+    const row = state.daily.find(r => dateKey(r.date) === d);
+    const v = row ? toNum(row.activeKcalsOverride, NaN) : NaN;
+    return Number.isFinite(v) ? v : null;  // keep 0 as valid
+  }
+
+  // Back-compat: map mirror
+  const m = state.dailyOverrides && state.dailyOverrides[d];
+  if (m && Number.isFinite(+m.activeKcalsOverride)) return +m.activeKcalsOverride;
+
+  return null;
+}
 
 // Prefer daily override when present
 function getActiveForDate(dateStr){
