@@ -481,18 +481,26 @@ function renderTabs(active = 'dashboard'){
   });
 
   // global date picker (kept in sync with state)
- right.innerHTML = `
-  <button class="date-nav" id="ui-prev" title="Previous day [">‹</button>
+ // build the right-side date controls
+right.innerHTML = `
+  <button class="date-nav" id="ui-prev" title="Previous day">←</button>
   <input id="ui-date" type="date" value="${getWorkingDate()}" title="Change working date">
-  <button class="date-nav" id="ui-next" title="Next day ]">›</button>
+  <button class="date-nav" id="ui-next" title="Next day">→</button>
 `;
-const ui = $('#ui-date');
-const prev = $('#ui-prev');
-const next = $('#ui-next');
 
-ui.onchange = () => { setWorkingDate(ui.value); rerender(); };
-prev.onclick = () => { shiftWorkingDate(-1); };
-next.onclick = () => { shiftWorkingDate(+1); };
+// put both chunks into the nav
+nav.appendChild(left);
+nav.appendChild(right);
+
+// NOW wire the controls — they exist in the DOM
+const ui   = right.querySelector('#ui-date');
+const prev = right.querySelector('#ui-prev');
+const next = right.querySelector('#ui-next');
+
+if (ui)   ui.onchange = () => { setWorkingDate(dateKey(ui.value)); rerender(); };
+if (prev) prev.onclick = () => { shiftWorkingDate(-1); };
+if (next) next.onclick = () => { shiftWorkingDate(+1); };
+
 
 }
 
