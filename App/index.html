@@ -289,21 +289,37 @@ window.addEventListener('keydown', (e)=>{
 });
 
 /* --- Global working date (shared across screens) --- */
-function getWorkingDate(){
+function getWorkingDate() {
   return state.uiDate || todayStr();
 }
 
-function setWorkingDate(d){
-  state.uiDate = dateKey(d || todayStr());
+function setWorkingDate(d) {
+  const next = dateKey(d || todayStr());
+  const prev = state.uiDate || '';
+
+  if (next === prev) return;          // nothing to do
+
+  state.uiDate = next;
   saveState();
 
-  // Keep any on-screen pickers/filters in sync
-  const foodFilter = $('#f-filter'); if (foodFilter) foodFilter.value = state.uiDate;
-  const exFilter   = $('#e-filter'); if (exFilter)   exFilter.value   = state.uiDate;
-  const dsDate     = $('#ds-date');  if (dsDate)     dsDate.value     = state.uiDate;
-  const fDate      = $('#f-date');   if (fDate)      fDate.value      = state.uiDate;
-}
+  // Always keep these in sync
+  const ui = $('#ui-date');   if (ui)       ui.value       = next;
+  const fFilter = $('#f-filter'); if (fFilter) fFilter.value = next;
+  const eFilter = $('#e-filter'); if (eFilter) eFilter.value = next;
 
+  // Only update per-view form dates if the user hasn't changed them away
+  const dsDate = $('#ds-date');
+  if (dsDate) {
+    const cur = dsDate.value ? dateKey(dsDate.value) : '';
+    if (!cur || cur === prev) dsDate.value = next;
+  }
+
+  const fDate = $('#f-date');
+  if (fDate) {
+    const cur = fDate.value ? dateKey(fDate.value) : '';
+    if (!cur || cur === prev) fDate.value = next;
+  }
+}
 
 function timeKey(v){
   if (v instanceof Date) {
@@ -443,7 +459,13 @@ function loadState(){
 }
 let state = loadState();
 setWorkingDate(state.uiDate || todayStr());
-if (!state.uiDate) state.uiDate = todayStr();
+  // Ensure working date is valid; default to today on boot if missing/invalid
+if (!state.uiDate || !/^\d{4}-\d{2}-\d{2}$/.test(state.uiDate)) {
+  state.uiDate = todayStr();
+  saveState();
+}
+// Apply it to the UI (callers will rerender as needed)
+setWorkingDate(state.uiDate);
 SHEETS_ENDPOINT = state.settings.sheetsEndpoint || '';
 OPENAI_KEY = state.settings.openaiKey || '';
 OPENAI_MODEL = state.settings.openaiModel || 'gpt-4o-mini';
@@ -488,19 +510,13 @@ right.innerHTML = `
   <button class="date-nav" id="ui-next" title="Next day">→</button>
 `;
 
-// put both chunks into the nav
-nav.appendChild(left);
-nav.appendChild(right);
+const ui   = $('#ui-date');
+const prev = $('#ui-prev');
+const next = $('#ui-next');
 
-// NOW wire the controls — they exist in the DOM
-const ui   = right.querySelector('#ui-date');
-const prev = right.querySelector('#ui-prev');
-const next = right.querySelector('#ui-next');
-
-if (ui)   ui.onchange = () => { setWorkingDate(dateKey(ui.value)); rerender(); };
+if (ui)   ui.onchange  = () => { setWorkingDate(ui.value); rerender(); };
 if (prev) prev.onclick = () => { shiftWorkingDate(-1); };
 if (next) next.onclick = () => { shiftWorkingDate(+1); };
-
 
 }
 
