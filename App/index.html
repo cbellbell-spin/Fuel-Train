@@ -1673,24 +1673,54 @@ try {
 } catch (err) {
   console.error('Boot failed:', err);
 }
+const SYNC_MAX_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours
 
+function shouldSyncOnBoot() {
+  if (!SHEETS_ENDPOINT) return false;
+
+  // if endpoint changed since last run, force a pull
+  const lastEndpoint = localStorage.getItem('ft-last-endpoint') || '';
+  if (lastEndpoint !== SHEETS_ENDPOINT) return true;
+
+  // if we've never synced on this device
+  if (!state.lastSync) return true;
+
+  // if local caches are empty-ish
+  const counts = {
+    foods: state.foods?.length || 0,
+    exercises: state.exercises?.length || 0,
+    meals: state.meals?.length || 0,
+    daily: Object.keys(state.dailyOverrides || {}).length
+  };
+  const empty = (counts.foods + counts.exercises + counts.meals + counts.daily) === 0;
+  if (empty) return true;
+
+  // if last sync is stale
+  const age = Date.now() - Date.parse(state.lastSync);
+  return isFinite(age) && age > SYNC_MAX_AGE_MS;
+}
+
+// ----- boot: render, then conditional first-load sync -----
 (async function firstLoadSync(){
-  const key = 'ft-initial-sync:' + (SHEETS_ENDPOINT || 'none');
-  const already = localStorage.getItem(key);
   if (!SHEETS_ENDPOINT) return;
-  if (already === '1') return;
 
   try {
-    showLoadingBanner('Pulling today\'s data from Sheets...');
-    await trySync({ refresh:false });
-    localStorage.setItem(key, '1');
-    rerender();
+    if (!shouldSyncOnBoot()) return;
+
+    showLoadingBanner('Pulling data from Sheets…');
+    const info = await trySync({ refresh: true }); // uses your existing pipeline
+    // record endpoint for next boot
+    localStorage.setItem('ft-last-endpoint', SHEETS_ENDPOINT);
+    // state.lastSync is already set inside trySync()
+    console.log('Boot sync complete:', info);
   } catch (e) {
     console.warn('Initial sync failed', e);
+    // non-fatal; UI still works from local cache
   } finally {
     hideLoadingBanner();
   }
 })();
+
 </script>
 </body>
 </html>
