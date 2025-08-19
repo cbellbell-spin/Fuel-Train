@@ -1101,6 +1101,72 @@ function renderFood(){
   // finally, render table
   renderFoodTable();
 }
+function renderFoodTable(){
+  const container = $('#f-table');
+  if (!container) return;
+
+  const filter = ($('#f-filter') && $('#f-filter').value) || '';
+  const rows = state.foods.filter(r => !filter || dateKey(r.date) === filter);
+
+  const total = rows.reduce((a,b)=>{
+    a.cal += toNum(b.calories);
+    a.p   += toNum(b.protein);
+    a.c   += toNum(b.carbs);
+    a.f   += toNum(b.fat);
+    return a;
+  }, {cal:0,p:0,c:0,f:0});
+
+  container.innerHTML = `
+    <div class="row">
+      <span class="pill">Entries: ${rows.length}</span>
+      <span class="pill">Calories: ${fmt1(total.cal)}</span>
+      <span class="pill">Protein: ${fmt1(total.p)}g</span>
+      <span class="pill">Carbs: ${fmt1(total.c)}g</span>
+      <span class="pill">Fat: ${fmt1(total.f)}g</span>
+    </div>
+    <table>
+      <thead><tr><th>Date</th><th>Time</th><th>Item</th><th>Cal</th><th>P</th><th>C</th><th>F</th><th>Notes</th><th></th></tr></thead>
+      <tbody>
+        ${rows.map(r => `
+          <tr>
+            ${['date','time','item','calories','protein','carbs','fat','notes'].map(k=>{
+              let val = r[k] ?? '';
+              if (k === 'date') val = showDate(val);
+              if (k === 'time') val = showTime(val);
+              return `<td contenteditable class="inline-edit" data-id="${r.id}" data-field="${k}">${val}</td>`;
+            }).join('')}
+            <td><button class="btn danger small" data-del="${r.id}">Del</button></td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="small muted">Edit cells to update. Saves on blur. Deletes sync to Sheets if configured.</div>
+  `;
+
+  // inline edits
+  $$('#f-table [contenteditable]').forEach(cell=>{
+    cell.addEventListener('blur', ()=>{
+      const id=cell.dataset.id, field=cell.dataset.field;
+      const row=state.foods.find(x=> x.id===id); if(!row) return;
+      const raw = cell.textContent.trim();
+      if (field === 'date') row.date = dateKey(raw);
+      else if (field === 'time') row.time = timeKey(raw);
+      else if (['calories','protein','carbs','fat'].includes(field)) row[field] = toNum(raw,0);
+      else row[field] = raw;
+      saveState(); if (SHEETS_ENDPOINT) pushRow('Food Log', row);
+      renderFoodTable();
+    });
+  });
+
+  // deletes
+  $$('#f-table [data-del]').forEach(btn=>{
+    btn.onclick = ()=>{
+      const id=btn.getAttribute('data-del');
+      state.foods = state.foods.filter(x=> x.id!==id);
+      saveState(); if (SHEETS_ENDPOINT) deleteRow('Food Log', id);
+      renderFoodTable();
+    };
+  });
+}
 
 function renderExercise(){
   const el=$('#view-ex');
