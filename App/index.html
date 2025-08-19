@@ -275,12 +275,20 @@ function dateKey(v){
   }
   return todayStr();
 }
+// add this next to todayStr/dateKey helpers
+function addDaysLocal(dateStr, delta) {
+  // Force local midnight to avoid UTC parsing quirks
+  const d = new Date(String(dateStr || todayStr()) + 'T00:00:00');
+  d.setDate(d.getDate() + (delta || 0));
+  return dateKey(d);  // your existing normalizer returns YYYY-MM-DD
+}
+  
 function shiftWorkingDate(deltaDays){
-  const d = new Date(getWorkingDate());
-  d.setDate(d.getDate() + deltaDays);
-  setWorkingDate(dateKey(d));
+  const newDate = addDaysLocal(getWorkingDate(), deltaDays);
+  setWorkingDate(newDate);
   rerender();
 }
+
 window.addEventListener('keydown', (e)=>{
   if (e.target && ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName)) return;
   if (e.key === '[') shiftWorkingDate(-1);
@@ -507,7 +515,7 @@ function renderTabs(active = 'dashboard') {
   const right = document.createElement('div');
   right.className = 'tabs-right';
   right.innerHTML = `
-    <button class="date-nav" id="ui-prev" title="Previous day" aria-label="Previous day">‹</button>
+    <button type="button" class="date-nav" id="ui-prev" title="Previous day" aria-label="Previous day">‹</button>
     <input id="ui-date" type="date" value="${getWorkingDate()}" title="Change working date" />
     <button class="date-nav" id="ui-next" title="Next day" aria-label="Next day">›</button>
   `;
