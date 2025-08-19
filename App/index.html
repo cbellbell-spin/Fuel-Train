@@ -472,11 +472,6 @@ SHEETS_ENDPOINT = state.settings.sheetsEndpoint || '';
 OPENAI_KEY      = state.settings.openaiKey      || '';
 OPENAI_MODEL    = state.settings.openaiModel    || 'gpt-4o-mini';
 
-// header + first screen
-renderTabs('dashboard');
-switchView('dashboard');
-function saveState(){ localStorage.setItem('ft-app-state-v2', JSON.stringify(state)); }
-
 /* ---------- tabs ---------- */
 const tabs = [
   {id:'dashboard', label:'Dashboard'},
@@ -487,15 +482,20 @@ const tabs = [
   {id:'settings',  label:'Settings'},
   {id:'suggest',   label:'Suggestions'}
 ];
+  
+// header + first screen
+renderTabs('dashboard');
+switchView('dashboard');
+function saveState(){ localStorage.setItem('ft-app-state-v2', JSON.stringify(state)); }
 
-function renderTabs(active = 'dashboard'){
+function renderTabs(active = 'dashboard') {
   const nav = $('#tabs');
   if (!nav) return;
 
   // Left: tab buttons
   const left = document.createElement('div');
   left.className = 'tabs-left';
-  tabs.forEach(t => {
+  TABS.forEach(t => {
     const b = document.createElement('button');
     b.textContent = t.label;
     if (t.id === active) b.classList.add('active');
@@ -507,25 +507,37 @@ function renderTabs(active = 'dashboard'){
   const right = document.createElement('div');
   right.className = 'tabs-right';
   right.innerHTML = `
-    <button class="date-nav" id="ui-prev" title="Previous day">‹</button>
-    <input id="ui-date" type="date" value="${getWorkingDate()}" title="Change working date">
-    <button class="date-nav" id="ui-next" title="Next day">›</button>
+    <button class="date-nav" id="ui-prev" title="Previous day" aria-label="Previous day">‹</button>
+    <input id="ui-date" type="date" value="${getWorkingDate()}" title="Change working date" />
+    <button class="date-nav" id="ui-next" title="Next day" aria-label="Next day">›</button>
   `;
 
-  // Mount first, then wire
+  // Mount
   nav.innerHTML = '';
   nav.appendChild(left);
   nav.appendChild(right);
 
+  // Wire (after mount)
   const ui   = $('#ui-date');
   const prev = $('#ui-prev');
   const next = $('#ui-next');
 
   if (ui) {
-    ui.onchange = () => { setWorkingDate(ui.value); rerender(); };
+    // ensure value reflects current working date
+    ui.value = getWorkingDate();
+    ui.onchange = () => {
+      setWorkingDate(ui.value);
+      rerender();
+    };
   }
-  if (prev) prev.onclick = () => { shiftWorkingDate(-1); };
-  if (next) next.onclick = () => { shiftWorkingDate(+1); };
+  if (prev) prev.onclick = () => {
+    shiftWorkingDate(-1);
+    const u = $('#ui-date'); if (u) u.value = getWorkingDate();
+  };
+  if (next) next.onclick = () => {
+    shiftWorkingDate(+1);
+    const u = $('#ui-date'); if (u) u.value = getWorkingDate();
+  };
 }
 
 function switchView(id){
