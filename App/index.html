@@ -457,18 +457,24 @@ function loadState(){
     return s;
   }catch{ return JSON.parse(JSON.stringify(defaultState)); }
 }
+// --- Boot: load state, normalize working date, then render header + first view
 let state = loadState();
-setWorkingDate(state.uiDate || todayStr());
-  // Ensure working date is valid; default to today on boot if missing/invalid
+
+// normalize working date once
 if (!state.uiDate || !/^\d{4}-\d{2}-\d{2}$/.test(state.uiDate)) {
   state.uiDate = todayStr();
   saveState();
 }
-// Apply it to the UI (callers will rerender as needed)
-setWorkingDate(state.uiDate);
+setWorkingDate(state.uiDate);   // <- does NOT rerender; just updates state + any visible inputs
+
+// env keys (keep as you had)
 SHEETS_ENDPOINT = state.settings.sheetsEndpoint || '';
-OPENAI_KEY = state.settings.openaiKey || '';
-OPENAI_MODEL = state.settings.openaiModel || 'gpt-4o-mini';
+OPENAI_KEY      = state.settings.openaiKey      || '';
+OPENAI_MODEL    = state.settings.openaiModel    || 'gpt-4o-mini';
+
+// header + first screen
+renderTabs('dashboard');
+switchView('dashboard');
 function saveState(){ localStorage.setItem('ft-app-state-v2', JSON.stringify(state)); }
 
 /* ---------- tabs ---------- */
@@ -483,43 +489,44 @@ const tabs = [
 ];
 
 function renderTabs(active = 'dashboard'){
-  const nav = document.getElementById('tabs');
+  const nav = $('#tabs');
   if (!nav) return;
 
-  // container skeleton: [left buttons]    [right global-date]
-  nav.innerHTML = '';
-  const left  = document.createElement('div');
-  const right = document.createElement('div');
-  left.className  = 'tabs-left';
-  right.className = 'tabs-right';
-
-  // build buttons
+  // Left: tab buttons
+  const left = document.createElement('div');
+  left.className = 'tabs-left';
   tabs.forEach(t => {
     const b = document.createElement('button');
     b.textContent = t.label;
-    b.className   = (t.id === active) ? 'active' : '';
-    b.onclick     = () => switchView(t.id);
+    if (t.id === active) b.classList.add('active');
+    b.onclick = () => switchView(t.id);
     left.appendChild(b);
   });
 
-  // global date picker (kept in sync with state)
- // build the right-side date controls
-right.innerHTML = `
-  <button class="date-nav" id="ui-prev" title="Previous day">←</button>
-  <input id="ui-date" type="date" value="${getWorkingDate()}" title="Change working date">
-  <button class="date-nav" id="ui-next" title="Next day">→</button>
-`;
+  // Right: date controls (prev | date | next)
+  const right = document.createElement('div');
+  right.className = 'tabs-right';
+  right.innerHTML = `
+    <button class="date-nav" id="ui-prev" title="Previous day">‹</button>
+    <input id="ui-date" type="date" value="${getWorkingDate()}" title="Change working date">
+    <button class="date-nav" id="ui-next" title="Next day">›</button>
+  `;
 
-const ui   = $('#ui-date');
-const prev = $('#ui-prev');
-const next = $('#ui-next');
+  // Mount first, then wire
+  nav.innerHTML = '';
+  nav.appendChild(left);
+  nav.appendChild(right);
 
-if (ui)   ui.onchange  = () => { setWorkingDate(ui.value); rerender(); };
-if (prev) prev.onclick = () => { shiftWorkingDate(-1); };
-if (next) next.onclick = () => { shiftWorkingDate(+1); };
+  const ui   = $('#ui-date');
+  const prev = $('#ui-prev');
+  const next = $('#ui-next');
 
+  if (ui) {
+    ui.onchange = () => { setWorkingDate(ui.value); rerender(); };
+  }
+  if (prev) prev.onclick = () => { shiftWorkingDate(-1); };
+  if (next) next.onclick = () => { shiftWorkingDate(+1); };
 }
-
 
 function switchView(id){
   $$('.view').forEach(v=> v.style.display='none');
