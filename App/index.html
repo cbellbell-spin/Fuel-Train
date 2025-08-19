@@ -495,7 +495,7 @@ function renderTabs(active = 'dashboard') {
   // Left: tab buttons
   const left = document.createElement('div');
   left.className = 'tabs-left';
-  TABS.forEach(t => {
+  tabs.forEach(t => {
     const b = document.createElement('button');
     b.textContent = t.label;
     if (t.id === active) b.classList.add('active');
