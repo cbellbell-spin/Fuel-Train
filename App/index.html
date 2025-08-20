@@ -692,40 +692,59 @@ async function pushRow(sheet, row){ if(!SHEETS_ENDPOINT) return; try{ await api(
 async function deleteRow(sheet, id){ if(!SHEETS_ENDPOINT) return; try{ await api('delete',{sheet,id}); }catch(e){ console.warn('deleteRow failed', e); } }
 
 /* ---------- AI lookup (GET to avoid preflight) ---------- */
+/* ---------- AI lookup (GET to avoid preflight) ---------- */
 async function lookupMacrosWithAI(description){
   if (!SHEETS_ENDPOINT) {
-    throw new Error('No backend set. Add your Apps Script Web App URL in Settings.');
+    throw new Error('No backend set. Add your Apps Script/Cloudflare URL in Settings.');
   }
   const url = SHEETS_ENDPOINT + '?action=ai.nutrition&description=' + encodeURIComponent(description || '');
-  const res = await fetch(url, { method: 'GET' });
+  console.debug('[AI] GET', url);
 
-  if (!res.ok) throw new Error(`Backend error ${res.status}`);
+  const res = await fetch(url, { method: 'GET', cache: 'no-store' });
+  const rawText = await res.text();                   // capture text for diagnostics
+  console.debug('[AI] status', res.status, rawText);
+
+  if (!res.ok) throw new Error(`Backend HTTP ${res.status}`);
 
   let data;
-  try { data = await res.json(); }
+  try { data = JSON.parse(rawText); }
   catch { throw new Error('Backend did not return JSON'); }
 
-  // Normalize common response shapes:
-  // { ok:true, result:{...} } | { calories, protein, carbs, fat } | [ { ... } ]
-  let raw = (data && (data.result ?? data)) ?? null;
-  if (Array.isArray(raw)) raw = raw[0] || null;
+  // If server wraps result in { ok:false, error } — surface it
+  if (data && data.ok === false) {
+    throw new Error(data.error || 'Backend returned ok=false');
+  }
 
-  if (!raw || typeof raw !== 'object') {
+  // Accept common shapes:
+  // {result:{...}} | {...} | [{...}]
+  let payload = (data && (data.result ?? data)) ?? null;
+  if (Array.isArray(payload)) payload = payload[0] || null;
+  if (!payload || typeof payload !== 'object') {
     throw new Error('AI lookup returned no result');
   }
 
-  // Coerce to numbers where possible; allow '' when missing so inputs clear gracefully
-  const normNum = (v) => {
-    const n = Number(v);
-    return Number.isFinite(n) ? n : '';
+  // parse numbers even if strings like "350 kcal"
+  const numish = (v) => {
+    if (v === 0) return 0;
+    if (v == null) return '';
+    const m = String(v).match(/-?\d+(\.\d+)?/);
+    return m ? Number(m[0]) : '';
   };
 
-  return {
-    calories: normNum(raw.calories),
-    protein:  normNum(raw.protein),
-    carbs:    normNum(raw.carbs),
-    fat:      normNum(raw.fat)
+  const out = {
+    calories: numish(payload.calories),
+    protein:  numish(payload.protein),
+    carbs:    numish(payload.carbs),
+    fat:      numish(payload.fat)
   };
+
+  // If literally all are blank, treat as failure so user gets a message
+  if (out.calories === '' && out.protein === '' && out.carbs === '' && out.fat === '') {
+    throw new Error('AI lookup returned no macros');
+  }
+
+  console.debug('[AI] parsed', out);
+  return out;
 }
 
 /* ---------- calculations ---------- */
@@ -934,7 +953,26 @@ if (fClear) {
   fClear.onclick = () => { $('#f-filter').value = ''; renderFoodTable(); };
 }
 
-  $('#qa-ai').onclick = async ()=>{
+  $('$('#qa-ai').onclick = async ()=>{
+  const btn = $('#qa-ai');
+  try{
+    const desc = ($('#qa-food').value || '').trim();
+    if(!desc){ toast('Enter a food description'); return; }
+    const old = btn.textContent; btn.disabled = true; btn.textContent = 'Looking…';
+
+    const r = await lookupMacrosWithAI(desc);
+    $('#qa-cal').value  = r.calories;
+    $('#qa-prot').value = r.protein;
+    $('#qa-carb').value = r.carbs;
+    $('#qa-fat').value  = r.fat;
+
+    btn.textContent = old; btn.disabled = false;
+  }catch(e){
+    btn.disabled = false; btn.textContent = 'Lookup macros with AI';
+    toast(e.message || 'AI lookup failed');
+  }
+};
+').onclick = async ()=>{
   try{
     const desc = ($('#qa-food').value || '').trim();
     if(!desc){ toast('Enter a food description'); return; }
@@ -1059,9 +1097,11 @@ function renderFood(){
 
   // ------- AI lookup helper -------
   const doAILookup = async ()=>{
+  const btn = $('#f-ai-inline');
   try{
     const desc = ($('#f-item').value || '').trim();
     if(!desc){ toast('Enter a food description'); return; }
+    const old = btn.textContent; btn.disabled = true; btn.textContent = 'Looking…';
 
     const r = await lookupMacrosWithAI(desc);
     $('#f-cal').value  = r.calories;
@@ -1069,13 +1109,16 @@ function renderFood(){
     $('#f-carb').value = r.carbs;
     $('#f-fat').value  = r.fat;
 
-    // (optional) seed library if we got any number back
+    // seed the library if anything was filled
     if (SHEETS_ENDPOINT && (r.calories || r.protein || r.carbs || r.fat)) {
       api('foodlib.upsert', {
         row: { name: desc, calories:r.calories||0, protein:r.protein||0, carbs:r.carbs||0, fat:r.fat||0, source:'ai' }
       }).catch(()=>{});
     }
+
+    btn.textContent = old; btn.disabled = false;
   }catch(e){
+    btn.disabled = false; btn.textContent = 'Lookup with AI';
     toast(e.message || 'AI lookup failed');
   }
 };
