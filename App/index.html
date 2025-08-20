@@ -691,59 +691,96 @@ async function trySync(opts={ refresh:true }) {
 async function pushRow(sheet, row){ if(!SHEETS_ENDPOINT) return; try{ await api('upsert',{sheet,row}); }catch(e){ console.warn('pushRow failed', e); } }
 async function deleteRow(sheet, id){ if(!SHEETS_ENDPOINT) return; try{ await api('delete',{sheet,id}); }catch(e){ console.warn('deleteRow failed', e); } }
 
-/* ---------- AI lookup (GET to avoid preflight) ---------- */
-/* ---------- AI lookup (GET to avoid preflight) ---------- */
-async function lookupMacrosWithAI(description){
-  if (!SHEETS_ENDPOINT) {
-    throw new Error('No backend set. Add your Apps Script/Cloudflare URL in Settings.');
-  }
-  const url = SHEETS_ENDPOINT + '?action=ai.nutrition&description=' + encodeURIComponent(description || '');
-  console.debug('[AI] GET', url);
-
-  const res = await fetch(url, { method: 'GET', cache: 'no-store' });
-  const rawText = await res.text();                   // capture text for diagnostics
-  console.debug('[AI] status', res.status, rawText);
-
-  if (!res.ok) throw new Error(`Backend HTTP ${res.status}`);
-
-  let data;
-  try { data = JSON.parse(rawText); }
-  catch { throw new Error('Backend did not return JSON'); }
-
-  // If server wraps result in { ok:false, error } — surface it
-  if (data && data.ok === false) {
-    throw new Error(data.error || 'Backend returned ok=false');
+// Robust macro lookup via OpenAI (JSON-only, tolerant parser + logging)
+async function lookupMacrosWithAI(desc) {
+  if (!OPENAI_KEY) {
+    throw new Error('Add your OpenAI key in Settings → OpenAI key.');
   }
 
-  // Accept common shapes:
-  // {result:{...}} | {...} | [{...}]
-  let payload = (data && (data.result ?? data)) ?? null;
-  if (Array.isArray(payload)) payload = payload[0] || null;
-  if (!payload || typeof payload !== 'object') {
-    throw new Error('AI lookup returned no result');
-  }
+  const model = OPENAI_MODEL || 'gpt-4o-mini';
 
-  // parse numbers even if strings like "350 kcal"
-  const numish = (v) => {
-    if (v === 0) return 0;
-    if (v == null) return '';
-    const m = String(v).match(/-?\d+(\.\d+)?/);
-    return m ? Number(m[0]) : '';
+  const body = {
+    model,
+    temperature: 0.2,
+    response_format: { type: 'json_object' }, // strict JSON result
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You estimate nutrition for foods. ' +
+          'Return ONLY JSON with decimal numbers in kcal/grams, keys: calories, protein, carbs, fat. ' +
+          'No units, no extras.'
+      },
+      {
+        role: 'user',
+        content:
+          `Food: ${desc}\n` +
+          'Return JSON like {"calories": 420, "protein": 25.5, "carbs": 48.2, "fat": 12.7}.'
+      }
+    ]
   };
 
+  let resp, json, text, obj;
+  try {
+    resp = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + OPENAI_KEY
+      },
+      body: JSON.stringify(body)
+    });
+  } catch (netErr) {
+    console.error('[AI lookup] network error', netErr);
+    throw new Error('Network error calling OpenAI');
+  }
+
+  if (!resp.ok) {
+    const errText = await resp.text().catch(()=> '');
+    console.error('[AI lookup] HTTP', resp.status, errText);
+    throw new Error(`OpenAI error ${resp.status}`);
+  }
+
+  try {
+    json = await resp.json();
+    text = json?.choices?.[0]?.message?.content || '';
+  } catch (parseErr) {
+    console.error('[AI lookup] JSON decode error', parseErr);
+    throw new Error('Could not read OpenAI response');
+  }
+
+  // Primary: strict JSON
+  try { obj = JSON.parse(text); } catch (_) { obj = null; }
+
+  // Fallbacks in case the model sneaks units/strings or different casing
+  const pick = (o, k) => (o && (o[k] ?? o[k.toLowerCase?.()] ?? o[k.toUpperCase?.()]));
   const out = {
-    calories: numish(payload.calories),
-    protein:  numish(payload.protein),
-    carbs:    numish(payload.carbs),
-    fat:      numish(payload.fat)
+    calories: toNum(pick(obj, 'calories'), NaN),
+    protein:  toNum(pick(obj, 'protein'),  NaN),
+    carbs:    toNum(pick(obj, 'carbs'),    NaN),
+    fat:      toNum(pick(obj, 'fat'),      NaN),
   };
 
-  // If literally all are blank, treat as failure so user gets a message
-  if (out.calories === '' && out.protein === '' && out.carbs === '' && out.fat === '') {
+  // Last-gasp: pull numbers via regex if text is not clean JSON
+  const ensureNumber = (v, key) => Number.isFinite(v) ? v :
+    toNum((text.match(new RegExp(`"${key}"\\s*:\\s*([0-9.]+)`,'i'))||[])[1], NaN);
+
+  out.calories = ensureNumber(out.calories, 'calories');
+  out.protein  = ensureNumber(out.protein,  'protein');
+  out.carbs    = ensureNumber(out.carbs,    'carbs');
+  out.fat      = ensureNumber(out.fat,      'fat');
+
+  if (![out.calories, out.protein, out.carbs, out.fat].some(Number.isFinite)) {
+    console.warn('[AI lookup] unparseable response', { json, text, obj });
     throw new Error('AI lookup returned no macros');
   }
 
-  console.debug('[AI] parsed', out);
+  // Clamp silly negatives, round to 1 dp for macros
+  out.calories = Math.max(0, Math.round(out.calories));
+  out.protein  = Math.max(0, Math.round(out.protein  * 10) / 10);
+  out.carbs    = Math.max(0, Math.round(out.carbs    * 10) / 10);
+  out.fat      = Math.max(0, Math.round(out.fat      * 10) / 10);
+
   return out;
 }
 
