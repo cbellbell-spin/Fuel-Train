@@ -953,8 +953,7 @@ if (fClear) {
   fClear.onclick = () => { $('#f-filter').value = ''; renderFoodTable(); };
 }
 
-// Quick-add: AI lookup button
-$('#qa-ai').onclick = async ()=>{
+  $('$('#qa-ai').onclick = async ()=>{
   const btn = $('#qa-ai');
   try{
     const desc = ($('#qa-food').value || '').trim();
