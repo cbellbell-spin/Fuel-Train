@@ -953,45 +953,55 @@ if (fClear) {
   fClear.onclick = () => { $('#f-filter').value = ''; renderFoodTable(); };
 }
 
-// Quick-add: AI lookup button
-$('#qa-ai').onclick = async ()=>{
-  const btn = $('#qa-ai');
-  try{
-    const desc = ($('#qa-food').value || '').trim();
-    if(!desc){ toast('Enter a food description'); return; }
-    const old = btn.textContent; btn.disabled = true; btn.textContent = 'Looking…';
+// === Quick-add wiring ===
+const aiBtn  = $('#qa-ai');
+const addBtn = $('#qa-add');
 
-    const r = await lookupMacrosWithAI(desc);
-    $('#qa-cal').value  = r.calories;
-    $('#qa-prot').value = r.protein;
-    $('#qa-carb').value = r.carbs;
-    $('#qa-fat').value  = r.fat;
+// AI lookup just fills the quick-add inputs
+if (aiBtn) {
+  aiBtn.onclick = async () => {
+    try {
+      const desc = ($('#qa-food').value || '').trim();
+      if (!desc) { toast('Enter a food description'); return; }
 
-    btn.textContent = old; btn.disabled = false;
-  }catch(e){
-    btn.disabled = false; btn.textContent = 'Lookup macros with AI';
-    toast(e.message || 'AI lookup failed');
-  }
-};
+      const old = aiBtn.textContent;
+      aiBtn.disabled = true; aiBtn.textContent = 'Looking…';
 
-// Quick-add: Add food to log button
-$('#qa-add').onclick = ()=>{
-  const food = {
-    id: uid(),
-    date: todayStr(),
-    time: new Date().toTimeString().slice(0,5),
-    item: ($('#qa-food').value.trim() || 'Food'),
-    calories: toNum($('#qa-cal').value,0),
-    protein: toNum($('#qa-prot').value,0),
-    carbs: toNum($('#qa-carb').value,0),
-    fat: toNum($('#qa-fat').value,0),
-    notes: ''
+      const r = await lookupMacrosWithAI(desc);
+      $('#qa-cal').value  = r.calories ?? '';
+      $('#qa-prot').value = r.protein  ?? '';
+      $('#qa-carb').value = r.carbs    ?? '';
+      $('#qa-fat').value  = r.fat      ?? '';
+    } catch (e) {
+      toast(e.message || 'AI lookup failed');
+    } finally {
+      aiBtn.disabled = false; aiBtn.textContent = 'Lookup macros with AI';
+    }
   };
-  state.foods.push(food);
-  saveState();
-  if (SHEETS_ENDPOINT) pushRow('Food Log', food);
-  renderDashboard();
-};
+}
+
+// "Add food" actually creates the row
+if (addBtn) {
+  addBtn.onclick = () => {
+    const food = {
+      id: uid(),
+      date: getWorkingDate(),
+      time: new Date().toTimeString().slice(0,5),
+      item: ($('#qa-food').value.trim() || 'Food'),
+      calories: toNum($('#qa-cal').value, 0),
+      protein:  toNum($('#qa-prot').value, 0),
+      carbs:    toNum($('#qa-carb').value, 0),
+      fat:      toNum($('#qa-fat').value, 0),
+      notes: ''
+    };
+    state.foods.push(food);
+    saveState();
+    if (SHEETS_ENDPOINT) pushRow('Food Log', food);
+    renderDashboard();
+  };
+}
+} // <-- this closes renderDashboard()
+
 function renderFood(){
   const el = $('#view-food');
   el.innerHTML = `
