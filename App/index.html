@@ -953,7 +953,8 @@ if (fClear) {
   fClear.onclick = () => { $('#f-filter').value = ''; renderFoodTable(); };
 }
 
-  $('$('#qa-ai').onclick = async ()=>{
+ // Quick-add: AI lookup button
+$('#qa-ai').onclick = async ()=>{
   const btn = $('#qa-ai');
   try{
     const desc = ($('#qa-food').value || '').trim();
@@ -972,22 +973,6 @@ if (fClear) {
     toast(e.message || 'AI lookup failed');
   }
 };
-').onclick = async ()=>{
-  try{
-    const desc = ($('#qa-food').value || '').trim();
-    if(!desc){ toast('Enter a food description'); return; }
-
-    const r = await lookupMacrosWithAI(desc);
-    $('#qa-cal').value  = r.calories; 
-    $('#qa-prot').value = r.protein;  
-    $('#qa-carb').value = r.carbs;    
-    $('#qa-fat').value  = r.fat;
-  }catch(e){
-    toast(e.message || 'AI lookup failed');
-  }
-};
-
-  $('#qa-add').onclick = ()=>{
     const food={ id:uid(), date:todayStr(), time:new Date().toTimeString().slice(0,5), item:$('#qa-food').value.trim()||'Food',
       calories:toNum($('#qa-cal').value,0), protein:toNum($('#qa-prot').value,0), carbs:toNum($('#qa-carb').value,0), fat:toNum($('#qa-fat').value,0), notes:'' };
     state.foods.push(food); saveState(); if(SHEETS_ENDPOINT) pushRow('Food Log', food); renderDashboard();
