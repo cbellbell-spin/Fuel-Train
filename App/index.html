@@ -953,7 +953,7 @@ if (fClear) {
   fClear.onclick = () => { $('#f-filter').value = ''; renderFoodTable(); };
 }
 
- // Quick-add: AI lookup button
+// Quick-add: AI lookup button
 $('#qa-ai').onclick = async ()=>{
   const btn = $('#qa-ai');
   try{
@@ -973,12 +973,25 @@ $('#qa-ai').onclick = async ()=>{
     toast(e.message || 'AI lookup failed');
   }
 };
-    const food={ id:uid(), date:todayStr(), time:new Date().toTimeString().slice(0,5), item:$('#qa-food').value.trim()||'Food',
-      calories:toNum($('#qa-cal').value,0), protein:toNum($('#qa-prot').value,0), carbs:toNum($('#qa-carb').value,0), fat:toNum($('#qa-fat').value,0), notes:'' };
-    state.foods.push(food); saveState(); if(SHEETS_ENDPOINT) pushRow('Food Log', food); renderDashboard();
-  };
-}
 
+// Quick-add: Add food to log button
+$('#qa-add').onclick = ()=>{
+  const food = {
+    id: uid(),
+    date: todayStr(),
+    time: new Date().toTimeString().slice(0,5),
+    item: ($('#qa-food').value.trim() || 'Food'),
+    calories: toNum($('#qa-cal').value,0),
+    protein: toNum($('#qa-prot').value,0),
+    carbs: toNum($('#qa-carb').value,0),
+    fat: toNum($('#qa-fat').value,0),
+    notes: ''
+  };
+  state.foods.push(food);
+  saveState();
+  if (SHEETS_ENDPOINT) pushRow('Food Log', food);
+  renderDashboard();
+};
 function renderFood(){
   const el = $('#view-food');
   el.innerHTML = `
